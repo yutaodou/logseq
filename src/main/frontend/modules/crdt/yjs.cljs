@@ -47,14 +47,6 @@
     (let [result (serialize doc)]
       (idb/set-item! (str "ydoc-" path) result))))
 
-(defn template-doc->base64
-  [content]
-  (when content
-    (let [doc (new-doc)]
-      (init-y-text! doc content)
-      (let [b (new (gobj/get buffer "Buffer") (serialize doc))]
-        (.toString b "base64")))))
-
 (defn get-file-db-doc
   [path]
   (when path
@@ -62,14 +54,13 @@
             idb-cache (idb/get-item (str "ydoc-" path))
             doc (or cached-doc
                     (let [doc (new-doc)]
+                      (.on doc "update" (fn [_update _origin]
+                                          (set-file-db-doc! path doc)))
                       (when idb-cache
                         (apply-update doc idb-cache))
                       doc))]
-      (.on doc "update" (fn [_update _origin]
-                          (prn "set new doc: " {:path path
-                                                :content (get-doc-text doc)})
-                          (set-file-db-doc! path doc)))
-      (state/set-state! [:file-db/crdt path] doc)
+      (when-not cached-doc
+        (state/set-state! [:file-db/crdt path] doc))
       doc)))
 
 (defn delete-file-db-doc!
@@ -77,17 +68,20 @@
   (swap! state/state dissoc :file-db/crdt path))
 
 (defn merge-docs!
-  [path new-ydoc deltas]
+  [path new-ydoc-binary deltas]
   (p/let [doc (get-file-db-doc path)
           doc (if (seq deltas) (apply-delta! doc deltas) doc)]
-    (if new-ydoc (apply-update doc (serialize new-ydoc)) doc)))
+    (if new-ydoc-binary (apply-update doc new-ydoc-binary) doc)
+    doc))
 
 (defn merge-template-doc!
-  [template-doc]
-  (let [doc (new-doc)]
+  [path deltas]
+  (p/let [doc (get-file-db-doc path)
+          template-doc (new-doc)]
     ;; To avoid duplications when merging conflicts from multiple clients
     ;; TODO: fork yjs so that random clientIDs can't be the value `(js/Math.pow 2 52)`
     (set! (.-clientID template-doc) (js/Math.pow 2 52))
+    (when (seq deltas) (apply-delta! template-doc deltas))
     (apply-update doc (serialize template-doc))
     doc))
 
@@ -185,4 +179,18 @@
   (apply-update d1 (serialize d2))
 
   (prn "Merge (duplicated): " (get-doc-text d1))
+
+  ;; (def doc1 (new-doc))
+  ;; (set! (.-clientID doc1) 1000)
+  ;; (def template-doc (-> doc1
+  ;;                       (init-y-text! "- foo\n- bar")))
+
+  ;; (def d1 (merge-template-doc! template-doc))
+  ;; (def template-doc-2 (-> (new-doc)
+  ;;                         (init-y-text! "- foo\n- bar")))
+  ;; (def d2 (merge-template-doc! template-doc-2))
+
+  ;; (apply-update d1 (serialize d2))
+
+  ;; (prn "Merge (un-duplicated): " (get-doc-text d1))
   )

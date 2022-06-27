@@ -92,12 +92,17 @@
       path)))
 
 (defn read-file
-  [path]
-  (try
-    (when (fs/existsSync path)
-      (.toString (fs/readFileSync path)))
-    (catch js/Error e
-      (js/console.error e))))
+  ([path]
+   (read-file path {}))
+  ([path options]
+   (try
+     (when (fs/existsSync path)
+       (let [result (fs/readFileSync path)]
+         (if (:binary options)
+           result
+           (.toString result))))
+     (catch js/Error e
+       (js/console.error e)))))
 
 (defn get-focused-window
   []

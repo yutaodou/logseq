@@ -85,8 +85,8 @@
     (let [dir (backup-file/get-backup-dir repo path)]
       (.openPath shell dir))))
 
-(defmethod handle :readFile [_window [_ path]]
-  (utils/read-file path))
+(defmethod handle :readFile [_window [_ path options]]
+  (utils/read-file path options))
 
 (defn writable?
   [path]

@@ -62,25 +62,26 @@
       (when-not contents-matched?
         (ipc/ipc "backupDbFile" (config/get-local-dir repo) path disk-content content))
       (->
-       (p/let [ydoc-path (str "/logseq/ydoc/"
+       (p/let [ydoc-path (str dir "/logseq/ydoc/"
                               (->
                                path
                                (string/replace (config/get-local-dir repo) "")
                                (string/replace #"^/" "")
                                (string/replace "/" "_"))
                               ".ydoc")
-               disk-ydoc (-> (protocol/read-file this dir ydoc-path nil)
+               disk-ydoc (-> (protocol/read-file this dir ydoc-path {:binary true})
                              (p/catch (fn [error]
                                         (prn "Error: " error)
                                         nil)))
                deltas (crdt-yjs/get-ytext-deltas db-content content)
-               [merged-content merged-doc] (let [merged-doc (crdt-yjs/merge-docs! path disk-ydoc deltas)
-                                                 merged-content (crdt-yjs/get-doc-text merged-doc)]
-                                             [merged-content merged-doc])
                merged-doc (if (:by-journal-template? opts)
-                            (crdt-yjs/merge-template-doc! merged-doc)
-                            merged-doc)
-               _ (when merged-doc (ipc/ipc "writeFile" repo ydoc-path (crdt-yjs/serialize merged-doc)))
+                            (crdt-yjs/merge-template-doc! path deltas)
+                            (crdt-yjs/merge-docs! path disk-ydoc deltas))
+               merged-content (crdt-yjs/get-doc-text merged-doc)
+               _ (prn {:by-template? (:by-journal-template? opts)
+                       :path path
+                       :ydoc-path ydoc-path})
+               _ (when merged-doc (ipc/ipc "writeFile" repo ydoc-path (gobj/get (crdt-yjs/serialize merged-doc) "buffer")))
                result (ipc/ipc "writeFile" repo path merged-content)
                mtime (gobj/get result "mtime")]
          (db/set-file-last-modified-at! repo path mtime)
@@ -93,6 +94,7 @@
            (ok-handler repo path result))
          result)
        (p/catch (fn [error]
+                  (js/console.error error)
                   (if error-handler
                     (error-handler error)
                     (log/error :write-file-failed error))))))))
@@ -119,9 +121,9 @@
   (rmdir! [_this _dir]
     ;; Too dangerious!!! We'll never implement this.
     nil)
-  (read-file [_this dir path _options]
+  (read-file [_this dir path options]
     (let [path (concat-path dir path)]
-      (ipc/ipc "readFile" path)))
+      (ipc/ipc "readFile" path options)))
   (write-file! [this repo dir path content opts]
     (let [path (concat-path dir path)]
       (p/let [stat (p/catch
