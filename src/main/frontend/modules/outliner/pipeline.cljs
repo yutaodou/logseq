@@ -4,8 +4,8 @@
             [frontend.state :as state]))
 
 (defn updated-page-hook
-  [_tx-report page]
-  (file/sync-to-file page))
+  [tx-report page]
+  (file/sync-to-file page (:tx-meta tx-report)))
 
 (defn invoke-hooks
   [tx-report]

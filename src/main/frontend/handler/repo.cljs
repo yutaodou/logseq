@@ -139,6 +139,7 @@
      (p/let [_ (fs/mkdir-if-not-exists (str repo-dir "/" config/app-name))
              _ (fs/mkdir-if-not-exists (str repo-dir "/" config/app-name "/" config/recycle-dir))
              _ (fs/mkdir-if-not-exists (str repo-dir "/" (config/get-journals-directory)))
+             _ (fs/mkdir-if-not-exists (str repo-dir "/" config/app-name "/ydoc"))
              _ (file-handler/create-metadata-file repo-url encrypted?)
              _ (create-config-file-if-not-exists repo-url)
              _ (create-contents-file repo-url)

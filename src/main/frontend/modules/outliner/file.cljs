@@ -16,7 +16,7 @@
 (def batch-write-interval 1000)
 
 (defn do-write-file!
-  [repo page-db-id]
+  [repo page-db-id tx-meta]
   (let [page-block (db/pull repo '[*] page-db-id)
         page-db-id (:db/id page-block)
         blocks (model/get-page-blocks-no-cache repo (:block/name page-block))]
@@ -25,15 +25,15 @@
                    (nil? (:block/file page-block)))
       (let [tree (tree/blocks->vec-tree repo blocks (:block/name page-block))]
         (if page-block
-          (file/save-tree page-block tree)
+          (file/save-tree page-block tree tx-meta)
           (js/console.error (str "can't find page id: " page-db-id)))))))
 
 (defn write-files!
   [pages]
   (when (seq pages)
     (when-not config/publishing?
-      (doseq [[repo page-id] (set pages)]
-        (try (do-write-file! repo page-id)
+      (doseq [[repo page-id tx-meta] (set pages)]
+        (try (do-write-file! repo page-id tx-meta)
              (catch js/Error e
                (notification/show!
                 [:div
@@ -43,13 +43,15 @@
                (log/error :file/write-file-error {:error e})))))))
 
 (defn sync-to-file
-  [{page-db-id :db/id}]
-  (if (nil? page-db-id)
-    (notification/show!
-     "Write file failed, can't find the current page!"
-     :error)
-    (when-let [repo (state/get-current-repo)]
-      (async/put! write-chan [repo page-db-id]))))
+  ([page]
+   (sync-to-file page nil))
+  ([{page-db-id :db/id} tx-meta]
+   (if (nil? page-db-id)
+     (notification/show!
+      "Write file failed, can't find the current page!"
+      :error)
+     (when-let [repo (state/get-current-repo)]
+       (async/put! write-chan [repo page-db-id tx-meta])))))
 
 (def *writes-finished? (atom true))
 

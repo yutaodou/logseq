@@ -2022,11 +2022,13 @@
                          :else
                          true)]
          (outliner-tx/transact!
-           {:outliner-op :insert-blocks}
+           {:outliner-op :insert-blocks
+            :by-journal-template? true}
            (save-current-block!)
            (let [result (outliner-core/insert-blocks! blocks'
                                                       target
-                                                      (assoc opts :sibling? sibling?'))]
+                                                      (assoc opts
+                                                             :sibling? sibling?'))]
              (edit-last-block-after-inserted! result))))))))
 
 (defn template-on-chosen-handler

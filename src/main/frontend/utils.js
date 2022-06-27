@@ -1,4 +1,5 @@
 import path from 'path/path.js'
+import { diffChars } from 'diff'
 
 // TODO split the capacitor abilities to a separate file for capacitor APIs
 import { StatusBar, Style } from '@capacitor/status-bar'
@@ -312,3 +313,37 @@ export const nodePath = Object.assign({}, path, {
     return path.extname(input)
   }
 })
+
+// Copied from https://github.com/motifland/yfs/blob/main/src/yjs.ts
+
+// Compute the set of Yjs delta operations (that is, `insert` and
+// `delete`) required to go from initialText to finalText.
+// Based on https://github.com/kpdecker/jsdiff.
+export const getDeltaOperations = (initialText, finalText) => {
+  if (initialText === finalText) {
+    return []
+  }
+
+  const edits = diffChars(initialText, finalText)
+  let prevOffset = 0
+  let deltas = []
+
+  for (const edit of edits) {
+    if (edit.removed && edit.value) {
+      deltas = [
+        ...deltas,
+        ...[
+          ...(prevOffset > 0 ? [{ retain: prevOffset }] : []),
+          { delete: edit.value.length }
+        ]
+      ]
+      prevOffset = 0
+    } else if (edit.added && edit.value) {
+      deltas = [...deltas, ...[{ retain: prevOffset }, { insert: edit.value }]]
+      prevOffset = edit.value.length
+    } else {
+      prevOffset = edit.value.length
+    }
+  }
+  return deltas
+}

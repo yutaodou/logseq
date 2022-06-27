@@ -24,6 +24,7 @@
             [frontend.fs.nfs :as nfs]
             [frontend.fs.sync :as sync]
             [frontend.fs.watcher-handler :as fs-watcher]
+            [frontend.handler.config :as config-handler]
             [frontend.handler.common :as common-handler]
             [frontend.handler.editor :as editor-handler]
             [frontend.handler.file :as file-handler]
@@ -51,7 +52,8 @@
             [goog.dom :as gdom]
             [logseq.db.schema :as db-schema]
             [promesa.core :as p]
-            [rum.core :as rum]))
+            [rum.core :as rum]
+            [frontend.modules.crdt.yjs :as yjs]))
 
 ;; TODO: should we move all events here?
 
@@ -482,6 +484,10 @@
           "It seems that your config.edn is broken. We've restored it with the default content and saved the previous content to the file logseq/broken-config.edn."]
          :warning
          false)))))
+
+(defmethod handle :file/reset [[_ repo path content opts]]
+  (when (and repo path content)
+    (file-handler/alter-file repo path content opts)))
 
 (defmethod handle :file-watcher/changed [[_ ^js event]]
   (let [type (.-event event)

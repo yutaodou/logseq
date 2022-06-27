@@ -9,7 +9,8 @@
             [goog.object :as gobj]
             [lambdaisland.glogi :as log]
             [promesa.core :as p]
-            [frontend.encrypt :as encrypt]))
+            [frontend.encrypt :as encrypt]
+            [frontend.modules.crdt.yjs :as crdt-yjs]))
 
 (defn concat-path
   [dir path]
@@ -34,7 +35,7 @@
       (p/resolved (= (string/trim disk-content) (string/trim db-content))))))
 
 (defn- write-file-impl!
-  [this repo dir path content {:keys [ok-handler error-handler old-content skip-compare?]} stat]
+  [this repo dir path content {:keys [ok-handler error-handler old-content skip-compare?] :as opts} stat]
   (if skip-compare?
     (p/catch
         (p/let [result (ipc/ipc "writeFile" repo path content)]
@@ -51,38 +52,50 @@
                                           (js/console.error error)
                                           nil))))
             disk-content (or disk-content "")
-            ext (string/lower-case (util/get-file-ext path))
-            db-content (or old-content (db/get-file repo path) "")
-            contents-matched? (contents-matched? disk-content db-content)
-            pending-writes (state/get-write-chan-length)]
-      (cond
-        (and
-         (not= stat :not-found)         ; file on the disk was deleted
-         (not contents-matched?)
-         (not (contains? #{"excalidraw" "edn" "css"} ext))
-         (not (string/includes? path "/.recycle/"))
-         (zero? pending-writes))
-        (p/let [disk-content (encrypt/decrypt disk-content)]
-          (state/pub-event! [:file/not-matched-from-disk path disk-content content]))
-
-        :else
-        (->
-         (p/let [result (ipc/ipc "writeFile" repo path content)
-                 mtime (gobj/get result "mtime")]
-           (when-not contents-matched?
-             (ipc/ipc "backupDbFile" (config/get-local-dir repo) path disk-content content))
-           (db/set-file-last-modified-at! repo path mtime)
-           (p/let [content (if (encrypt/encrypted-db? (state/get-current-repo))
-                             (encrypt/decrypt content)
-                             content)]
-             (db/set-file-content! repo path content))
-           (when ok-handler
-             (ok-handler repo path result))
-           result)
-         (p/catch (fn [error]
-                    (if error-handler
-                      (error-handler error)
-                      (log/error :write-file-failed error)))))))))
+            disk-content (->
+                          (if (encrypt/encrypted-db? (state/get-current-repo))
+                            (encrypt/decrypt disk-content)
+                            disk-content)
+                          (string/trimr))
+            db-content (string/trimr (or old-content (db/get-file repo path) ""))
+            contents-matched? (contents-matched? disk-content db-content)]
+      (when-not contents-matched?
+        (ipc/ipc "backupDbFile" (config/get-local-dir repo) path disk-content content))
+      (->
+       (p/let [ydoc-path (str "/logseq/ydoc/"
+                              (->
+                               path
+                               (string/replace (config/get-local-dir repo) "")
+                               (string/replace #"^/" "")
+                               (string/replace "/" "_"))
+                              ".ydoc")
+               disk-ydoc (-> (protocol/read-file this dir ydoc-path nil)
+                             (p/catch (fn [error]
+                                        (prn "Error: " error)
+                                        nil)))
+               deltas (crdt-yjs/get-ytext-deltas db-content content)
+               [merged-content merged-doc] (let [merged-doc (crdt-yjs/merge-docs! path disk-ydoc deltas)
+                                                 merged-content (crdt-yjs/get-doc-text merged-doc)]
+                                             [merged-content merged-doc])
+               merged-doc (if (:by-journal-template? opts)
+                            (crdt-yjs/merge-template-doc! merged-doc)
+                            merged-doc)
+               _ (when merged-doc (ipc/ipc "writeFile" repo ydoc-path (crdt-yjs/serialize merged-doc)))
+               result (ipc/ipc "writeFile" repo path merged-content)
+               mtime (gobj/get result "mtime")]
+         (db/set-file-last-modified-at! repo path mtime)
+         (when-not (= merged-content content)
+           (state/pub-event! [:file/reset repo path merged-content
+                              {:skip-compare? true
+                               :from-disk? true}]))
+         (db/set-file-content! repo path merged-content)
+         (when ok-handler
+           (ok-handler repo path result))
+         result)
+       (p/catch (fn [error]
+                  (if error-handler
+                    (error-handler error)
+                    (log/error :write-file-failed error))))))))
 
 (defn- open-dir []
   (p/let [dir-path (util/mocked-open-dir-path)

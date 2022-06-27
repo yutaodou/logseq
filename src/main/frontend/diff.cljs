@@ -6,7 +6,8 @@
             [cljs-bean.core :as bean]
             [frontend.util :as util]
             [logseq.graph-parser.util :as gp-util]
-            [frontend.util.text :as text-util]))
+            [frontend.util.text :as text-util]
+            ["node-diff3" :refer [diff3Merge] :as diff3]))
 
 (defn diff
   [s1 s2]
@@ -71,3 +72,28 @@
       (catch js/Error e
         (log/error :diff/find-position {:error e})
         (count markup)))))
+
+(defn- ->chars
+  [^js s]
+  (.split s ""))
+
+(defn diff3-merge
+  "Prefers `a` if there're any conflicts"
+  [a o b]
+  (let [result (diff3Merge a o b #js {:excludeFalseConflicts true
+                                      :stringSeparator " "})]
+    (->>
+     (map-indexed (fn [^js idx i]
+                    (let [s (->> (if-let [result (.-ok i)]
+                                   result
+                                   (let [conflict ^js (.-conflict i)
+                                         conflict-a (.-a conflict)
+                                         conflict-b (.-b conflict)]
+                                     (prn {:conflict conflict})
+                                     (concat conflict-a conflict-b)))
+                                 (string/join " "))]
+                      (if (zero? idx)
+                        s
+                        (str " " s))))
+       result)
+     (apply str))))

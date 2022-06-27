@@ -174,9 +174,7 @@
         (:file-path config)
         (let [path (:file-path config)
               content (db/get-file path)
-              [_ id _ _ _] (:rum/args state)
-              value (some-> (gdom/getElement id)
-                            (gobj/get "value"))]
+              value (gobj/get textarea "value")]
           (when (and
                  (not (string/blank? value))
                  (not= (string/trim value) (string/trim content)))

@@ -237,7 +237,10 @@
 
      :encryption/graph-parsing?             false
 
-     :ui/loading?                           {}})))
+     :ui/loading?                           {}
+
+     ;; {file-path Y.doc}
+     :file-db/crdt                          {}})))
 
 ;; block uuid -> {content(String) -> ast}
 (def blocks-ast-cache (atom {}))
