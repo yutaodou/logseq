@@ -52,12 +52,10 @@
                                           (js/console.error error)
                                           nil))))
             disk-content (or disk-content "")
-            disk-content (->
-                          (if (encrypt/encrypted-db? (state/get-current-repo))
-                            (encrypt/decrypt disk-content)
-                            disk-content)
-                          (string/trimr))
-            db-content (string/trimr (or old-content (db/get-file repo path) ""))
+            disk-content (if (encrypt/encrypted-db? (state/get-current-repo))
+                           (encrypt/decrypt disk-content)
+                           disk-content)
+            db-content (or old-content (db/get-file repo path) "")
             contents-matched? (contents-matched? disk-content db-content)]
       (when-not contents-matched?
         (ipc/ipc "backupDbFile" (config/get-local-dir repo) path disk-content content))
