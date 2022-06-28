@@ -56,7 +56,8 @@
                            (encrypt/decrypt disk-content)
                            disk-content)
             db-content (or old-content (db/get-file repo path) "")
-            contents-matched? (contents-matched? disk-content db-content)]
+            contents-matched? (contents-matched? disk-content db-content)
+            edn? (= "edn" (util/get-file-ext path))]
       (when-not contents-matched?
         (ipc/ipc "backupDbFile" (config/get-local-dir repo) path disk-content content))
       (->
@@ -72,13 +73,11 @@
                                         (prn "Error: " error)
                                         nil)))
                deltas (crdt-yjs/get-ytext-deltas db-content content)
-               merged-doc (if (:by-journal-template? opts)
-                            (crdt-yjs/merge-template-doc! path deltas)
-                            (crdt-yjs/merge-docs! path disk-ydoc deltas))
-               merged-content (crdt-yjs/get-doc-text merged-doc)
-               _ (prn {:by-template? (:by-journal-template? opts)
-                       :path path
-                       :ydoc-path ydoc-path})
+               merged-doc (when-not edn?
+                            (if (:by-journal-template? opts)
+                              (crdt-yjs/merge-template-doc! path deltas)
+                              (crdt-yjs/merge-docs! path disk-ydoc deltas)))
+               merged-content (if edn? content (crdt-yjs/get-doc-text merged-doc))
                _ (when merged-doc (ipc/ipc "writeFile" repo ydoc-path (gobj/get (crdt-yjs/serialize merged-doc) "buffer")))
                result (ipc/ipc "writeFile" repo path merged-content)
                mtime (gobj/get result "mtime")]
