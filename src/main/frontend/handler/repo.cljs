@@ -194,7 +194,7 @@
                              (:file/content file)
                              {:new-graph? new-graph?
                               :re-render-root? false
-                              :from-disk? true})
+                              :skip-file-write? true})
     (catch :default e
       (state/set-parsing-state! (fn [m]
                                   (update m :failed-parsing-files conj [(:file/path file) e])))))

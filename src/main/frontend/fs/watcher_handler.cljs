@@ -15,7 +15,9 @@
             [promesa.core :as p]
             [frontend.state :as state]
             [frontend.encrypt :as encrypt]
-            [frontend.fs :as fs]))
+            [frontend.fs :as fs]
+            [frontend.util :as util]
+            [frontend.modules.crdt.yjs :as crdt-yjs]))
 
 ;; all IPC paths must be normalized! (via gp-util/path-normalize)
 
@@ -32,14 +34,13 @@
             (editor/set-block-property! block-id "id" block-id)))))))
 
 (defn- handle-add-and-change!
-  [repo path content db-content mtime backup?]
-  (p/let [
-          ;; save the previous content in a versioned bak file to avoid data overwritten.
-          _ (when backup? (ipc/ipc "backupDbFile" (config/get-local-dir repo) path db-content content))
-          _ (file-handler/alter-file repo path content {:re-render-root? true
-                                                        :from-disk? true})]
-    (set-missing-block-ids! content)
-    (db/set-file-last-modified-at! repo path mtime)))
+  [repo path content db-content mtime backup? write-again?]
+  (let [original-content (db/get-file repo path)]
+    (when-not (= content original-content)
+      (p/let [_ (file-handler/alter-file repo path content {:re-render-root? true
+                                                            :from-disk? true})]
+        (set-missing-block-ids! content)
+        (db/set-file-last-modified-at! repo path mtime)))))
 
 (defn handle-changed!
   [type {:keys [dir path content stat] :as payload}]
@@ -66,7 +67,7 @@
                (not= (string/trim content) (string/trim db-content))
                (not= path pages-metadata-path))
           (let [backup? (not (string/blank? db-content))]
-            (handle-add-and-change! repo path content db-content mtime backup?))
+            (handle-add-and-change! repo path content db-content mtime backup? false))
 
           (and (= "change" type)
                (not (db/file-exists? repo path)))
@@ -82,7 +83,7 @@
                          (string/trim (or (state/get-default-journal-template) "")))
                       (= (string/trim content) "-")
                       (= (string/trim content) "*")))
-            (handle-add-and-change! repo path content db-content mtime true))
+            (handle-add-and-change! repo path content db-content mtime true true))
 
           (and (= "unlink" type)
                (db/file-exists? repo path))

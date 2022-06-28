@@ -55,6 +55,7 @@
             doc (or cached-doc
                     (let [doc (new-doc)]
                       (.on doc "update" (fn [_update _origin]
+                                          (prn "doc updated: " (get-doc-text doc))
                                           (set-file-db-doc! path doc)))
                       (when idb-cache
                         (apply-update doc idb-cache))
@@ -66,6 +67,12 @@
 (defn delete-file-db-doc!
   [path]
   (swap! state/state dissoc :file-db/crdt path))
+
+(defn update-ydoc!
+  [path serialized-doc]
+  (when-let [doc (get-in @state/state [:file-db/crdt path])]
+    (apply-update doc serialized-doc)
+    (state/set-state! [:file-db/crdt path] doc)))
 
 (defn merge-docs!
   [path new-ydoc-binary deltas]
@@ -84,6 +91,12 @@
     (when (seq deltas) (apply-delta! template-doc deltas))
     (apply-update doc (serialize template-doc))
     doc))
+
+(defn ydoc-binary->text
+  [binary]
+  (let [doc (new-doc)]
+    (apply-update doc binary)
+    (get-doc-text doc)))
 
 (comment
   ;; reorder

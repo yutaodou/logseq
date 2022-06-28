@@ -131,6 +131,11 @@
                 file)
          file (gp-util/path-normalize file)
          new? (nil? (db/entity [:file/path file]))]
+     (when-let [page-id (db/get-file-page-id file)]
+       (db/transact! repo-url
+         [[:db/retract page-id :block/alias]
+          [:db/retract page-id :block/tags]]
+         options))
      (:tx
       (graph-parser/parse-file
        (db/get-db repo-url false)
@@ -147,38 +152,31 @@
 
 ;; TODO: Remove this function in favor of `alter-files`
 (defn alter-file
-  [repo path content {:keys [reset? re-render-root? from-disk? skip-compare? new-graph?]
+  [repo path content {:keys [reset? re-render-root? from-disk? skip-file-write? skip-compare? new-graph?]
                       :or {reset? true
                            re-render-root? false
                            from-disk? false
-                           skip-compare? false}}]
-  (let [original-content (db/get-file repo path)
-        write-file! (if from-disk?
-                      #(p/resolved nil)
-                      #(fs/write-file! repo (config/get-repo-dir repo) path content
-                                       (assoc (when original-content {:old-content original-content})
-                                              :skip-compare? skip-compare?)))
-        opts {:new-graph? new-graph?
-              :from-disk? from-disk?}]
-    (if reset?
-      (do
-        (when-let [page-id (db/get-file-page-id path)]
-          (db/transact! repo
-            [[:db/retract page-id :block/alias]
-             [:db/retract page-id :block/tags]]
-            opts))
-        (reset-file! repo path content opts))
-      (db/set-file-content! repo path content opts))
-    (util/p-handle (write-file!)
-                   (fn [_]
-                     (when (= path (config/get-config-path repo))
-                       (restore-config! repo true))
-                     (when (= path (config/get-custom-css-path repo))
-                       (ui-handler/add-style-if-exists!))
-                     (when re-render-root? (ui-handler/re-render-root!)))
-                   (fn [error]
-                     (println "Write file failed, path: " path ", content: " content)
-                     (log/error :write/failed error)))))
+                           skip-compare? false}
+                      :as opts}]
+  (let [original-content (db/get-file repo path)]
+    (when-not (= content original-content)
+      (let [write-file! (if skip-file-write?
+                          #(do
+                             (reset-file! repo path content opts)
+                             (db/set-file-content! repo path content))
+                          #(fs/write-file! repo (config/get-repo-dir repo) path content
+                                          (assoc (when original-content {:old-content original-content})
+                                                 :skip-compare? skip-compare?)))]
+        (util/p-handle (write-file!)
+                       (fn [_]
+                         (when (= path (config/get-config-path repo))
+                           (restore-config! repo true))
+                         (when (= path (config/get-custom-css-path repo))
+                           (ui-handler/add-style-if-exists!))
+                         (when re-render-root? (ui-handler/re-render-root!)))
+                       (fn [error]
+                         (println "Write file failed, path: " path ", content: " content)
+                         (log/error :write/failed error)))))))
 
 (defn set-file-content!
   [repo path new-content]

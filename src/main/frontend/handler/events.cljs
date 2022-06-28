@@ -478,16 +478,13 @@
     (let [path (config/get-config-path)
           broken-path (string/replace path "/config.edn" "/broken-config.edn")]
       (p/let [_ (fs/write-file! repo (config/get-repo-dir repo) broken-path content {})
-              _ (file-handler/alter-file repo path config/config-default-content {:skip-compare? true})]
+              _ (file-handler/alter-file repo path config/config-default-content {:skip-compare? true
+                                                                                  :reset? false})]
         (notification/show!
          [:p.content
           "It seems that your config.edn is broken. We've restored it with the default content and saved the previous content to the file logseq/broken-config.edn."]
          :warning
          false)))))
-
-(defmethod handle :file/reset [[_ repo path content opts]]
-  (when (and repo path content)
-    (file-handler/alter-file repo path content opts)))
 
 (defmethod handle :file-watcher/changed [[_ ^js event]]
   (let [type (.-event event)
@@ -594,6 +591,9 @@
     (state/update-state! :file/unlinked-dirs (fn [dirs] (disj dirs dir))))
   (when (= dir (config/get-repo-dir repo))
     (fs/watch-dir! dir)))
+
+(defmethod handle :graph/reset-file [[_ repo path content opts]]
+  (file-handler/reset-file! repo path content opts))
 
 (defn run!
   []

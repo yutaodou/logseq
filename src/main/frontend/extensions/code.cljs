@@ -181,7 +181,8 @@
             (file-handler/alter-file (state/get-current-repo)
                                      path
                                      (str (string/trim value) "\n")
-                                     {:re-render-root? true})))
+                                     {:re-render-root? true
+                                      :skip-compare? true})))
 
         :else
         nil))))

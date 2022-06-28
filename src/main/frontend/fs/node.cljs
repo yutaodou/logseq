@@ -72,7 +72,10 @@
                              (p/catch (fn [error]
                                         (prn "Error: " error)
                                         nil)))
-               deltas (crdt-yjs/get-ytext-deltas db-content content)
+               deltas (let [disk-ydoc-content (when disk-ydoc (crdt-yjs/ydoc-binary->text disk-ydoc))
+                            equal? (= disk-ydoc-content content)]
+                        (when-not equal?
+                          (crdt-yjs/get-ytext-deltas db-content content)))
                merged-doc (when-not edn?
                             (if (:by-journal-template? opts)
                               (crdt-yjs/merge-template-doc! path deltas)
@@ -82,11 +85,12 @@
                result (ipc/ipc "writeFile" repo path merged-content)
                mtime (gobj/get result "mtime")]
          (db/set-file-last-modified-at! repo path mtime)
-         (when-not (= merged-content content)
-           (state/pub-event! [:file/reset repo path merged-content
-                              {:skip-compare? true
-                               :from-disk? true}]))
          (db/set-file-content! repo path merged-content)
+
+         (when (or (and merged-doc (not= merged-content content))
+                   (not merged-doc))
+           (state/pub-event! [:graph/reset-file repo path merged-content opts]))
+
          (when ok-handler
            (ok-handler repo path result))
          result)
