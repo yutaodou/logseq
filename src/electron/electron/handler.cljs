@@ -466,9 +466,8 @@
   ;; Only close file watcher when:
   ;;    1. there is no one window on the same dir
   ;;    2. reset file watcher to resend `add` event on window refreshing
-  ;; (when dir
-  ;;   (watcher/watch-dir! dir))
-  )
+  (when dir
+    (watcher/watch-dir! dir)))
 
 (defmethod handle :unwatchDir [^js _window [_ dir]]
   (when dir
