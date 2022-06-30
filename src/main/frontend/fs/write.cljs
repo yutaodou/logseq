@@ -73,15 +73,14 @@
                _ (when merged-doc (write-file-fn repo ydoc-path (gobj/get (crdt-yjs/serialize merged-doc) "buffer")))
                result (write-file-fn repo path merged-content)
                mtime (gobj/get result "mtime")]
-         (db/set-file-last-modified-at! repo path mtime)
          (db/set-file-content! repo path merged-content)
-
-         (when (and
-                ;; not triggered by the current client
-                (not (:outliner/transact? opts))
-                (or (and merged-doc
-                         (not= merged-content db-content))
-                    (not merged-doc)))
+         (db/set-file-last-modified-at! repo path mtime)
+         (when (or (and merged-doc
+                        (not= merged-content content))
+                   ;; Detected by the file watcher
+                   (and (nil? (:outliner/transact? opts))
+                        (not= merged-content db-content))
+                   (not merged-doc))
            (state/pub-event! [:graph/reset-file repo path merged-content opts]))
 
          (when ok-handler
