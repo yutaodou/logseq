@@ -3,14 +3,15 @@
             [cljs-bean.core :as bean]
             [clojure.string :as string]
             [frontend.db :as db]
-            [frontend.encrypt :as encrypt]
             [frontend.fs.protocol :as protocol]
             [frontend.mobile.util :as mobile-util]
             [frontend.state :as state]
             [frontend.util :as util]
             [lambdaisland.glogi :as log]
             [promesa.core :as p]
-            [rum.core :as rum]))
+            [rum.core :as rum]
+            [frontend.fs.write :as write]
+            [frontend.config :as config]))
 
 (when (mobile-util/native-ios?)
   (defn iOS-ensure-documents!
@@ -99,67 +100,46 @@
           result (js->clj result :keywordize-keys true)]
     (map (fn [result] (update result :uri clean-uri)) result)))
 
-(defn- contents-matched?
-  [disk-content db-content]
-  (when (and (string? disk-content) (string? db-content))
-    (if (encrypt/encrypted-db? (state/get-current-repo))
-      (p/let [decrypted-content (encrypt/decrypt disk-content)]
-        (= (string/trim decrypted-content) (string/trim db-content)))
-      (p/resolved (= (string/trim disk-content) (string/trim db-content))))))
+(def backup-dir "logseq/bak")
+(defn- get-backup-dir
+  [repo-dir path ext]
+  (let [relative-path (-> (string/replace path repo-dir "")
+                          (string/replace (str "." ext) ""))]
+    (str repo-dir backup-dir "/" relative-path)))
+
+(defn- truncate-old-versioned-files!
+  "reserve the latest 3 version files"
+  [dir]
+  (p/let [files (readdir dir)
+          files (js->clj files :keywordize-keys true)
+          old-versioned-files (drop 3 (reverse (sort-by :mtime files)))]
+    (mapv (fn [file]
+            (.deleteFile Filesystem (clj->js {:path (js/encodeURI (:uri file))})))
+          old-versioned-files)))
+
+(defn backup-file
+  [repo-dir path content ext]
+  (let [backup-dir (get-backup-dir repo-dir path ext)
+        new-path (str backup-dir "/" (string/replace (.toISOString (js/Date.)) ":" "_") "." ext)]
+    (.writeFile Filesystem (clj->js {:data content
+                                     :path new-path
+                                     :encoding (.-UTF8 Encoding)
+                                     :recursive true}))
+    (truncate-old-versioned-files! backup-dir)))
+
 
 (defn- write-file-impl!
-  [_this repo _dir path content {:keys [ok-handler error-handler old-content skip-compare?]} stat]
-  (if skip-compare?
-    (p/catch
-     (p/let [result (.writeFile Filesystem (clj->js {:path path
-                                                     :data content
-                                                     :encoding (.-UTF8 Encoding)
-                                                     :recursive true}))]
-       (when ok-handler
-         (ok-handler repo path result)))
-     (fn [error]
-       (if error-handler
-         (error-handler error)
-         (log/error :write-file-failed error))))
-
-    (p/let [disk-content (-> (p/chain (read-file-utf8 path)
-                                      #(js->clj % :keywordize-keys true)
-                                      :data)
-                             (p/catch (fn [error]
-                                        (js/console.error error)
-                                        nil)))
-            disk-content (or disk-content "")
-            ext (string/lower-case (util/get-file-ext path))
-            db-content (or old-content (db/get-file repo (js/decodeURI path)) "")
-            contents-matched? (contents-matched? disk-content db-content)
-            pending-writes (state/get-write-chan-length)]
-      (cond
-        (and
-         (not= stat :not-found)   ; file on the disk was deleted
-         (not contents-matched?)
-         (not (contains? #{"excalidraw" "edn" "css"} ext))
-         (not (string/includes? path "/.recycle/"))
-         (zero? pending-writes))
-        (p/let [disk-content (encrypt/decrypt disk-content)]
-          (state/pub-event! [:file/not-matched-from-disk path disk-content content]))
-
-        :else
-        (->
-         (p/let [result (.writeFile Filesystem (clj->js {:path path
-                                                         :data content
-                                                         :encoding (.-UTF8 Encoding)
-                                                         :recursive true}))]
-           (p/let [content (if (encrypt/encrypted-db? (state/get-current-repo))
-                             (encrypt/decrypt content)
-                             content)]
-             (db/set-file-content! repo (js/decodeURI path) content))
-           (when ok-handler
-             (ok-handler repo path result))
-           result)
-         (p/catch (fn [error]
-                    (if error-handler
-                      (error-handler error)
-                      (log/error :write-file-failed error)))))))))
+  [this repo dir path content {:keys [ok-handler error-handler old-content skip-compare?] :as opts} stat]
+  (write/write-file! this repo dir path content
+                     (assoc opts
+                            :write-file-fn (fn [repo path content]
+                                             (.writeFile Filesystem (clj->js {:path path
+                                                                              :data content
+                                                                              :encoding (.-UTF8 Encoding)
+                                                                              :recursive true})))
+                            :backup-file-fn (fn [repo path disk-content content]
+                                              (backup-file (config/get-local-dir repo) path disk-content content)))
+                     stat))
 
 (defn get-file-path [dir path]
   (let [[dir path] (map #(some-> %
@@ -224,19 +204,16 @@
       result))
   (readdir [_this dir]                  ; recursive
     (readdir dir))
-  (unlink! [_this repo path {:keys [ok-handler error-handler]}]
-    (let [path (get-file-path nil path)]
-      (prn :unlink :path path)
-      (p/catch
-          (p/let [result (.deleteFile Filesystem
-                                      (clj->js
-                                       {:path path}))]
-            (when ok-handler
-              (ok-handler repo path result)))
-          (fn [error]
-            (if error-handler
-              (error-handler error)
-              (log/error :delete-file-failed error))))))
+  (unlink! [this repo path _opts]
+    (p/let [path (get-file-path nil path)
+            repo-dir (config/get-local-dir repo)
+            recycle-dir (str repo-dir config/app-name "/.recycle")
+            file-name (-> (string/replace path repo-dir "")
+                          (string/replace "/" "_")
+                          (string/replace "\\" "_"))
+            new-path (str recycle-dir "/" file-name)]
+      (protocol/mkdir! this recycle-dir)
+      (protocol/rename! this repo path new-path)))
   (rmdir! [_this _dir]
     ;; Too dangerious!!! We'll never implement this.
     nil)
@@ -250,8 +227,6 @@
          content)
        (p/catch (fn [error]
                   (log/error :read-file-failed error))))))
-  (delete-file! [_this _repo _dir _path _opts]
-    nil)
   (write-file! [this repo dir path content opts]
     (let [path (get-file-path dir path)]
       (p/let [stat (p/catch
@@ -279,7 +254,7 @@
             {:keys [path localDocumentsPath]} (p/chain
                                                (.pickFolder mobile-util/folder-picker)
                                                #(js->clj % :keywordize-keys true))
-            _ (when (and (mobile-util/native-ios?) 
+            _ (when (and (mobile-util/native-ios?)
                          (not (or (local-container-path? path localDocumentsPath)
                                   (mobile-util/iCloud-container-path? path))))
                 (state/pub-event! [:modal/show-instruction]))

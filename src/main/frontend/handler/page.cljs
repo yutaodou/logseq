@@ -168,11 +168,7 @@
       (db/transact! [[:db.fn/retractEntity [:file/path file-path]]])
       (when unlink-file?
         (->
-         (p/let [_ (and (config/local-db? repo)
-                        (mobile-util/native-platform?)
-                        ;; TODO: @leizhe remove fs/delete-file! and use fs/unlink!
-                        (fs/delete-file! repo file-path file-path {}))
-                 _ (fs/unlink! repo (config/get-repo-path repo file-path) nil)])
+         (p/let [_ (fs/unlink! repo (config/get-repo-path repo file-path) nil)])
          (p/catch (fn [err]
                     (js/console.error "error: " err))))))))
 
