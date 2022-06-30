@@ -76,9 +76,12 @@
          (db/set-file-last-modified-at! repo path mtime)
          (db/set-file-content! repo path merged-content)
 
-         (when (or (and merged-doc
-                        (not= merged-content db-content))
-                   (not merged-doc))
+         (when (and
+                ;; not triggered by the current client
+                (not (:outliner/transact? opts))
+                (or (and merged-doc
+                         (not= merged-content db-content))
+                    (not merged-doc)))
            (state/pub-event! [:graph/reset-file repo path merged-content opts]))
 
          (when ok-handler
