@@ -16,8 +16,7 @@
             [frontend.state :as state]
             [frontend.encrypt :as encrypt]
             [frontend.fs :as fs]
-            [frontend.util :as util]
-            [frontend.modules.crdt.yjs :as crdt-yjs]))
+            [frontend.util :as util]))
 
 ;; all IPC paths must be normalized! (via gp-util/path-normalize)
 
