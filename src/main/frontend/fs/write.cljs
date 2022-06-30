@@ -47,13 +47,16 @@
       (when-not contents-matched?
         (backup-file-fn (config/get-local-dir repo) path disk-content content))
       (->
-       (p/let [ydoc-path (str dir "/logseq/ydoc/"
-                              (->
-                               path
-                               (string/replace (config/get-local-dir repo) "")
-                               (string/replace #"^/" "")
-                               (string/replace "/" "_"))
-                              ".ydoc")
+       (p/let [ydoc-path (util/node-path.join
+                          dir
+                          "/logseq/ydoc/"
+                          (str
+                           (->
+                            path
+                            (string/replace (config/get-local-dir repo) "")
+                            (string/replace #"^/" "")
+                            (string/replace "/" "_"))
+                           ".ydoc"))
                disk-ydoc (-> (protocol/read-file this dir ydoc-path {:binary true})
                              (p/catch (fn [error]
                                         (prn "Error: " error)
