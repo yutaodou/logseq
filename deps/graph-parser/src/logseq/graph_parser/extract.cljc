@@ -13,7 +13,8 @@
             [logseq.graph-parser.property :as gp-property]
             [logseq.graph-parser.config :as gp-config]
             #?(:org.babashka/nbb [logseq.graph-parser.log :as log]
-               :default [lambdaisland.glogi :as log])))
+               :default [lambdaisland.glogi :as log])
+            #?(:cljs [promesa.core :as p])))
 
 (defn- get-page-name
   [file ast page-name-order]
@@ -159,8 +160,8 @@
     (let [format (gp-util/get-format file)
           _ (when verbose (println "Parsing start: " file))
           ast (gp-mldoc/->edn content (gp-mldoc/default-config format
-                                        ;; {:parse_outline_only? true}
-                                        )
+                                                               ;; {:parse_outline_only? true}
+                                                               )
                               user-config)]
       (when verbose (println "Parsing finished: " file))
       (let [first-block (ffirst ast)
@@ -184,6 +185,42 @@
         {:pages pages
          :blocks blocks
          :ast ast}))))
+
+#?(:cljs
+   (defn extract-async
+     "Extracts pages, blocks and ast from given file"
+     [file content {:keys [user-config verbose] :or {verbose true} :as options}]
+     (when-let [parse-fn (:async-parse-fn options)]
+       (if (string/blank? content)
+         (p/resolved [])
+         (p/let [format (gp-util/get-format file)
+                 _ (when verbose (println "Parsing start: " file))
+                 ast (parse-fn content (gp-mldoc/default-config format
+                                                                ;; {:parse_outline_only? true}
+                                                                )
+                               user-config)]
+           (when verbose (println "Parsing finished: " file))
+           (let [first-block (ffirst ast)
+                 properties (let [properties (and (gp-property/properties-ast? first-block)
+                                                  (->> (last first-block)
+                                                       (map (fn [[x y]]
+                                                              [x (if (and (string? y)
+                                                                          (not (and (= (keyword x) :file-path)
+                                                                                    (string/starts-with? y "file:"))))
+                                                                   (text/parse-property format x y user-config)
+                                                                   y)]))
+                                                       (into {})
+                                                       (walk/keywordize-keys)))]
+                              (when (and properties (seq properties))
+                                (if (:filters properties)
+                                  (update properties :filters
+                                          (fn [v]
+                                            (string/replace (or v "") "\\" "")))
+                                  properties)))
+                 [pages blocks] (extract-pages-and-blocks format ast properties file content options)]
+             {:pages pages
+              :blocks blocks
+              :ast ast}))))))
 
 (defn- with-block-uuid
   [pages]

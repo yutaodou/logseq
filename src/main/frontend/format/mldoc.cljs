@@ -7,7 +7,10 @@
             [lambdaisland.glogi :as log]
             ["mldoc" :as mldoc :refer [Mldoc]]
             [logseq.graph-parser.mldoc :as gp-mldoc]
-            [logseq.graph-parser.util :as gp-util]))
+            [logseq.graph-parser.util :as gp-util]
+            [frontend.util :as util]
+            [frontend.util.pool :as pool]
+            [promesa.core :as p]))
 
 (defonce anchorLink (gobj/get Mldoc "anchorLink"))
 (defonce parseOPML (gobj/get Mldoc "parseOPML"))
@@ -54,6 +57,22 @@
   "Wrapper around gp-mldoc/->edn which provides config state"
   [content config]
   (gp-mldoc/->edn content config (state/get-config)))
+
+(defn ->edn-async
+  [content config]
+  (if util/node-test?
+    (p/resolved (->edn content config))
+    (try
+      (if (string/blank? content)
+        (p/resolved [])
+        (p/let [v (pool/add-parse-job! content config)]
+          (-> v
+              (gp-util/json->clj)
+              (gp-mldoc/update-src-full-content content)
+              (gp-mldoc/collect-page-properties gp-mldoc/parse-property {}))))
+      (catch js/Error e
+        (log/error :edn/convert-failed e)
+        (p/resolved [])))))
 
 (defrecord MldocMode []
   protocol/Format

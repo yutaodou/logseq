@@ -35,7 +35,8 @@
             [goog.object :as gobj]
             [lambdaisland.glogi :as log]
             [promesa.core :as p]
-            [logseq.db.schema :as db-schema]))
+            [logseq.db.schema :as db-schema]
+            [frontend.util.pool :as pool]))
 
 (defn set-global-error-notification!
   []
@@ -222,6 +223,7 @@
 
     (db/run-batch-txs!)
     (file/<ratelimit-file-writes!)
+    (pool/init-parser-pool!)
 
     (when config/dev?
       (enable-datalog-console))

@@ -78,7 +78,7 @@
         content (if remove-first-line? body (cons f body))]
     (string/join "\n" content)))
 
-(defn- update-src-full-content
+(defn update-src-full-content
   [ast content]
   (let [content (utf8/encode content)]
     (map (fn [[block pos-meta]]

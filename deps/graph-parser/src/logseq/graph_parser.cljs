@@ -6,7 +6,8 @@
             [logseq.graph-parser.date-time-util :as date-time-util]
             [logseq.graph-parser.config :as gp-config]
             [clojure.string :as string]
-            [clojure.set :as set]))
+            [clojure.set :as set]
+            [promesa.core :as p]))
 
 (defn- db-set-file-content!
   "Modified copy of frontend.db.model/db-set-file-content!"
@@ -21,7 +22,7 @@
                       :or {new? true
                            delete-blocks-fn (constantly [])}
                       :as options}]
-  (db-set-file-content! conn file content)
+  (frontend.util/profile "set db file" (db-set-file-content! conn file content))
   (let [format (gp-util/get-format file)
         file-content [{:file/path file}]
         {:keys [tx ast]}
@@ -32,7 +33,7 @@
                                            extract-options
                                            {:db @conn})
                    {:keys [pages blocks ast]}
-                   (extract/extract file content extract-options')
+                   (frontend.util/profile "extract" (extract/extract file content extract-options'))
                    delete-blocks (delete-blocks-fn (first pages) file)
                    block-ids (map (fn [block] {:block/uuid (:block/uuid block)}) blocks)
                    block-refs-ids (->> (mapcat :block/refs blocks)
@@ -42,7 +43,8 @@
                                        (seq))
                    ;; To prevent "unique constraint" on datascript
                    block-ids (set/union (set block-ids) (set block-refs-ids))
-                   pages (extract/with-ref-pages pages blocks)
+                   pages (frontend.util/profile "with ref pages"
+                          (extract/with-ref-pages pages blocks))
                    pages-index (map #(select-keys % [:block/name]) pages)]
                ;; does order matter?
                {:tx (concat file-content pages-index delete-blocks pages block-ids blocks)
@@ -53,9 +55,53 @@
                                ;; TODO: use file system timestamp?
                          (assoc :file/created-at (date-time-util/time-ms)))])
         tx' (gp-util/remove-nils tx)
-        result (d/transact! conn tx' (select-keys options [:new-graph? :from-disk?]))]
+        result (frontend.util/profile "transact db" (d/transact! conn tx' (select-keys options [:new-graph? :from-disk?])))]
     {:tx result
      :ast ast}))
+
+(defn parse-file-async
+  "Parse file asynchronously and save parsed data to the given db. Main parse fn used by logseq app"
+  [conn file content {:keys [new? delete-blocks-fn extract-options async-parse-fn]
+                      :or {new? true
+                           delete-blocks-fn (constantly [])}
+                      :as options}]
+  (when async-parse-fn
+    (db-set-file-content! conn file content)
+    (p/let [format (gp-util/get-format file)
+            file-content [{:file/path file}]
+            {:keys [tx ast]}
+            (if (contains? gp-config/mldoc-support-formats format)
+              (p/let [extract-options' (merge {:block-pattern (gp-config/get-block-pattern format)
+                                               :date-formatter "MMM do, yyyy"
+                                               :supported-formats (gp-config/supported-formats)
+                                               :async-parse-fn async-parse-fn}
+                                              extract-options
+                                              {:db @conn})
+                      {:keys [pages blocks ast]}
+                      (extract/extract-async file content extract-options')
+                      delete-blocks (delete-blocks-fn (first pages) file)
+                      block-ids (map (fn [block] {:block/uuid (:block/uuid block)}) blocks)
+                      block-refs-ids (->> (mapcat :block/refs blocks)
+                                          (filter (fn [ref] (and (vector? ref)
+                                                                 (= :block/uuid (first ref)))))
+                                          (map (fn [ref] {:block/uuid (second ref)}))
+                                          (seq))
+                      ;; To prevent "unique constraint" on datascript
+                      block-ids (set/union (set block-ids) (set block-refs-ids))
+                      pages (extract/with-ref-pages pages blocks)
+                      pages-index (map #(select-keys % [:block/name]) pages)]
+                ;; does order matter?
+                {:tx (concat file-content pages-index delete-blocks pages block-ids blocks)
+                 :ast ast})
+              (p/resolved {:tx file-content}))
+            tx (concat tx [(cond-> {:file/path file}
+                             new?
+                             ;; TODO: use file system timestamp?
+                             (assoc :file/created-at (date-time-util/time-ms)))])
+            tx' (gp-util/remove-nils tx)
+            result (d/transact! conn tx' (select-keys options [:new-graph? :from-disk?]))]
+      {:tx result
+       :ast ast})))
 
 (defn filter-files
   "Filters files in preparation for parsing. Only includes files that are
