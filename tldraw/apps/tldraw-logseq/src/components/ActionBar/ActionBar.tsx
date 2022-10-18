@@ -2,6 +2,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useApp } from '@tldraw/react'
 import { observer } from 'mobx-react-lite'
+import html2canvas from 'html2canvas'
+
 import * as React from 'react'
 import type { Shape } from '../../lib'
 import { TablerIcon } from '../icons'
@@ -47,6 +49,27 @@ export const ActionBar = observer(function ActionBar(): JSX.Element {
         </Button>
         <Separator.Root className="tl-toolbar-separator" orientation="vertical" />
         <ZoomMenu />
+        <Button
+          title="Zoom out"
+          onClick={() => {
+            html2canvas(document.querySelector('.tl-canvas') as HTMLElement).then(canvas => {
+              canvas.toBlob(
+                blob => {
+                  const a = document.createElement('a')
+                  if (blob) {
+                    a.href = URL.createObjectURL(blob)
+                    a.download = 'tldraw.png'
+                    a.click()
+                  }
+                },
+                'image/png',
+                1
+              )
+            })
+          }}
+        >
+          Export
+        </Button>
       </div>
     </div>
   )
