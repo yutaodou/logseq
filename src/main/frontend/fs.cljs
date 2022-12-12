@@ -45,12 +45,10 @@
       bfs-record)))
 
 (defn mkdir!
-  [dir]
-  (protocol/mkdir! (get-fs dir) dir))
-
-(defn mkdir-recur!
-  [dir]
-  (protocol/mkdir-recur! (get-fs dir) dir))
+  ([dir]
+   (protocol/mkdir! (get-fs dir) dir))
+  ([dir opts]
+   (protocol/mkdir! (get-fs dir) dir opts)))
 
 (defn readdir
   [dir & {:keys [path-only?]}]

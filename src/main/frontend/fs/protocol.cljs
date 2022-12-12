@@ -3,8 +3,10 @@
   {:clj-kondo/config {:linters {:private-call {:level :off}}}})
 
 (defprotocol Fs
-  (mkdir! [this dir])
-  (mkdir-recur! [this dir])
+  (mkdir! [this dir] [this dir opts]
+    "Create a directory. If `opts` is provided, it should be a map with
+    `:recursive` key. If `:recursive` is true, create parent directories as needed.
+    Returns a promise that resolves to nil if successful, or rejects with an error.")
   (readdir [this dir])
   (unlink! [this repo path opts])
   (rmdir! [this dir])

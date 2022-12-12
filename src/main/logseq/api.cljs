@@ -192,7 +192,7 @@
   (p/let [repo           ""
           path           (util/node-path.join root-dir sub-root)
           exist?         (fs/file-exists? path "")
-          _              (when-not exist? (fs/mkdir-recur! path))
+          _              (when-not exist? (fs/mkdir! path {:recursive true}))
           user-path      (util/node-path.join path file)
           sub-dir?       (string/starts-with? user-path path)
           _              (when-not sub-dir?
@@ -200,7 +200,7 @@
                            (throw "write file denied"))
           user-path-root (util/node-path.dirname user-path)
           exist?         (fs/file-exists? user-path-root "")
-          _              (when-not exist? (fs/mkdir-recur! user-path-root))
+          _              (when-not exist? (fs/mkdir! user-path-root {:recursive true}))
           _              (fs/write-file! repo "" user-path content {:skip-compare? true})]
     user-path))
 

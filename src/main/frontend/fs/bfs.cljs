@@ -1,4 +1,5 @@
-(ns ^:no-doc frontend.fs.bfs
+(ns frontend.fs.bfs
+  "lightning-fs backend"
   (:require [frontend.fs.protocol :as protocol]
             [frontend.util :as util]
             [promesa.core :as p]))

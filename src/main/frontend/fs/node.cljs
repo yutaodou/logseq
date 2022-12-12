@@ -34,13 +34,13 @@
   [this repo dir path content {:keys [ok-handler error-handler old-content skip-compare?]} stat]
   (if skip-compare?
     (p/catch
-        (p/let [result (ipc/ipc "writeFile" repo path content)]
-          (when ok-handler
-            (ok-handler repo path result)))
-        (fn [error]
-          (if error-handler
-            (error-handler error)
-            (log/error :write-file-failed error))))
+     (p/let [result (ipc/ipc "writeFile" repo path content)]
+       (when ok-handler
+         (ok-handler repo path result)))
+     (fn [error]
+       (if error-handler
+         (error-handler error)
+         (log/error :write-file-failed error))))
 
     (p/let [disk-content (when (not= stat :not-found)
                            (-> (protocol/read-file this dir path nil)
@@ -86,8 +86,12 @@
   protocol/Fs
   (mkdir! [_this dir]
     (ipc/ipc "mkdir" dir))
-  (mkdir-recur! [_this dir]
-    (ipc/ipc "mkdir-recur" dir))
+  (mkdir! [_this dir opts]
+    (let [{:keys [recursive]
+           :or {recursive false}} opts]
+      (if recursive
+        (ipc/ipc "mkdir-recur" dir)
+        (ipc/ipc "mkdir" dir))))
   (readdir [_this dir]                   ; recursive
     (ipc/ipc "readdir" dir))
   (unlink! [_this repo path _opts]
@@ -103,10 +107,10 @@
   (write-file! [this repo dir path content opts]
     (let [path (concat-path dir path)]
       (p/let [stat (p/catch
-                       (protocol/stat this dir path)
-                       (fn [_e] :not-found))
+                    (protocol/stat this dir path)
+                    (fn [_e] :not-found))
               sub-dir (first (util/get-dir-and-basename path))
-              _ (protocol/mkdir-recur! this sub-dir)]
+              _ (protocol/mkdir! this sub-dir {:recursive true})]
         (write-file-impl! this repo dir path content opts stat))))
   (rename! [_this _repo old-path new-path]
     (ipc/ipc "rename" old-path new-path))

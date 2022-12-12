@@ -312,27 +312,23 @@
 
 (defrecord ^:large-vars/cleanup-todo Capacitorfs []
   protocol/Fs
-  (mkdir! [_this dir]
+  (mkdir! [this dir]
     (let [dir' (normalize-file-protocol-path "" dir)]
+      (protocol/mkdir! this dir' nil)))
+  (mkdir! [_this dir opts]
+    (let [{:keys [recursive]
+           :or {recursive false}} opts]
       (-> (.mkdir Filesystem
-                  (clj->js
-                   {:path dir'}))
+                  (clj->js {:path dir
+                            :recursive recursive}))
+          (p/then #(<stat dir))
+          (p/then #(if (= (:type %) "directory")
+                     (p/resolved nil)
+                     (p/rejected (js/Error. "mkdir failed"))))
           (p/catch (fn [error]
-                     (log/error :mkdir! {:path  dir'
+                     (log/error :mkdir! {:path dir
+                                         :recursive recursive
                                          :error error}))))))
-  (mkdir-recur! [_this dir]
-    (p/let
-     [_ (-> (.mkdir Filesystem
-                    (clj->js
-                     {:path dir
-                      :recursive true}))
-            (p/catch (fn [error]
-                       (log/error :mkdir-recur! {:path dir
-                                                 :error error}))))
-      stat (<stat dir)]
-      (if (= (:type stat) "directory")
-        (p/resolved true)
-        (p/rejected (js/Error. "mkdir-recur! failed")))))
   (readdir [_this dir]                  ; recursive
     (let [dir (if-not (string/starts-with? dir "file://")
                 (str "file://" dir)
@@ -347,7 +343,7 @@
                           (string/replace "/" "_")
                           (string/replace "\\" "_"))
             new-path (str recycle-dir "/" file-name)
-            _ (protocol/mkdir-recur! this recycle-dir)]
+            _ (protocol/mkdir! this recycle-dir {:recursive true})]
       (protocol/rename! this repo path new-path)))
   (rmdir! [_this _dir]
     ;; Too dangerous!!! We'll never implement this.
