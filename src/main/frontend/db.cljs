@@ -9,7 +9,7 @@
             [frontend.db.query-custom]
             [frontend.db.query-react]
             [frontend.db.react :as react]
-            [frontend.db.utils]
+            [frontend.db.utils :as db-utils]
             [frontend.db.persist :as db-persist]
             [frontend.db.migrate :as db-migrate]
             [frontend.namespaces :refer [import-vars]]
@@ -145,9 +145,11 @@
   ([repo]
    (start-db-conn! repo {}))
   ([repo option]
-   (conn/start! repo
-                (assoc option
-                       :listen-handler listen-and-persist!))))
+   (let [option' (cond->
+                   (assoc option :listen-handler listen-and-persist!)
+                   (util/electron?)
+                   (assoc :transact-fn transact!))]
+     (conn/start! repo option'))))
 
 (defn restore-graph-from-text!
   "Swap db string into the current db status
@@ -167,7 +169,7 @@
                          (db-migrate/migrate attached-db)
                          attached-db)]
                 (conn/reset-conn! db-conn db)))]
-    (d/transact! db-conn [{:schema/version db-schema/version}])))
+    (db-utils/transact! repo [{:schema/version db-schema/version}])))
 
 (defn restore-graph!
   "Restore db from serialized db cache"

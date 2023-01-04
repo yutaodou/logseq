@@ -8,7 +8,6 @@
             [clojure.core.async.interop :refer [p->c]]
             [clojure.set :as set]
             [clojure.string :as string]
-            [datascript.core :as d]
             [frontend.commands :as commands]
             [frontend.components.diff :as diff]
             [frontend.components.git :as git-component]
@@ -509,7 +508,7 @@
                      {:db/id id
                       :file/path new-path}))
                  files)]
-    (d/transact! conn tx)
+    (db/transact! deprecated-repo tx)
     (reset! conn/conns
             (update-keys @conn/conns
                          (fn [key] (if (string/includes? key deprecated-repo)

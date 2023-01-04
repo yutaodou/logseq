@@ -6,6 +6,7 @@
             [datascript.transit :as dt]
             [frontend.date :as date]
             [frontend.db.conn :as conn]
+            [frontend.db.core :as db-core]
             [frontend.config :as config]
             [logseq.graph-parser.util :as gp-util]))
 
@@ -103,10 +104,7 @@
      (let [tx-data (->> (gp-util/remove-nils tx-data)
                         (remove nil?))]
        (when (seq tx-data)
-         (when-let [conn (conn/get-db repo-url false)]
-           (if tx-meta
-             (d/transact! conn (vec tx-data) tx-meta)
-             (d/transact! conn (vec tx-data)))))))))
+         (db-core/transact! repo-url tx-data tx-meta))))))
 
 (defn get-key-value
   ([key]

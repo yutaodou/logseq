@@ -459,7 +459,7 @@
                                   :block/original-name new-name}]
             page-txs            (if properties-block-tx (conj page-txs properties-block-tx) page-txs)]
 
-        (d/transact! (db/get-db repo false) page-txs)
+        (db/transact! repo page-txs)
 
         (when (fs-util/create-title-property? new-page-name)
           (page-property/add-property! new-page-name :title new-name))
@@ -575,7 +575,7 @@
 
                              (= (:block/parent block) {:db/id from-id})
                              (assoc :block/parent {:db/id to-id})))) blocks)]
-      (d/transact! conn tx-data)
+      (db/transact! repo tx-data)
       (outliner-file/sync-to-file {:db/id to-id})
 
       (rename-update-refs! from-page

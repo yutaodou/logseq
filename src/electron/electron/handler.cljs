@@ -28,7 +28,8 @@
             [electron.backup-file :as backup-file]
             [cljs.reader :as reader]
             [electron.server :as server]
-            [electron.find-in-page :as find]))
+            [electron.find-in-page :as find]
+            [electron.db :as db]))
 
 (defmulti handle (fn [_window args] (keyword (first args))))
 
@@ -687,6 +688,13 @@
 
 (defmethod handle :server/set-config [^js _win [_ config]]
   (server/set-config! config))
+
+(defmethod handle :db/transact [^js _win [_ repo tx-data-meta]]
+  (db/transact! repo tx-data-meta)
+  nil)
+
+(defmethod handle :db/query [^js _win [_ repo kind & args]]
+  (db/query repo kind args))
 
 (defn set-ipc-handler! [window]
   (let [main-channel "main"]

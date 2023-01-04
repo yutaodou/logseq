@@ -1,6 +1,6 @@
 (ns frontend.modules.editor.undo-redo
-  (:require [datascript.core :as d]
-            [frontend.db.conn :as conn]
+  (:require [frontend.db.conn :as conn]
+            [frontend.db :as db]
             [frontend.modules.datascript-report.core :as db-report]
             [frontend.state :as state]))
 
@@ -92,8 +92,8 @@
 
 (defn- transact!
   [txs tx-meta]
-  (let [conn (conn/get-db false)]
-    (d/transact! conn txs tx-meta)))
+  (when-let [repo (state/get-current-repo)]
+    (db/transact! repo txs tx-meta)))
 
 (defn undo
   []

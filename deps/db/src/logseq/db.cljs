@@ -6,11 +6,19 @@
 
 (defn start-conn
   "Create datascript conn with schema and default data"
-  []
-  (let [db-conn (d/create-conn db-schema/schema)]
-    (d/transact! db-conn [{:schema/version db-schema/version}
-                          {:block/name "card"
-                           :block/original-name "card"
-                           :block/uuid (d/squuid)}])
-    (d/transact! db-conn default-db/built-in-pages)
-    db-conn))
+  ([]
+   (start-conn nil))
+  ([transact-fn]
+   (let [tx-data (concat
+                  [{:schema/version db-schema/version}
+                   {:block/name "card"
+                    :block/original-name "card"
+                    :block/uuid (d/squuid)}]
+                  default-db/built-in-pages)]
+     (if transact-fn
+       (do
+         (transact-fn tx-data)
+         nil)
+       (let [db-conn (d/create-conn db-schema/schema)]
+         (d/transact! db-conn tx-data)
+         db-conn)))))

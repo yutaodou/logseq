@@ -215,11 +215,10 @@
 (defn set-file-last-modified-at!
   [repo path last-modified-at]
   (when (and repo path last-modified-at)
-    (when-let [conn (conn/get-db repo false)]
-      (d/transact! conn
-                   [{:file/path path
-                     :file/last-modified-at last-modified-at}]
-                   {:skip-refresh? true}))))
+    (db-utils/transact! repo
+      [{:file/path path
+        :file/last-modified-at last-modified-at}]
+      {:skip-refresh? true})))
 
 (defn get-file-last-modified-at
   [repo path]

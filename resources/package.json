@@ -38,6 +38,7 @@
     "@sentry/electron": "2.5.1",
     "posthog-js": "1.10.2",
     "@logseq/rsapi": "0.0.59",
+    "@logseq/datahike": "0.0.1",
     "electron-deeplink": "1.0.10",
     "abort-controller": "3.0.0",
     "fastify": "latest",
@@ -57,6 +58,7 @@
   },
   "resolutions": {
     "**/electron": "19.1.8",
-    "**/node-gyp": "9.0.0"
+    "**/node-gyp": "9.0.0",
+    "@logseq/datahike": "portal:/Users/tiensonqin/Codes/projects/datahike-rs"
   }
 }

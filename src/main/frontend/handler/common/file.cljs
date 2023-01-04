@@ -78,6 +78,8 @@
          options (merge (dissoc options :verbose)
                         {:new? new?
                          :delete-blocks-fn (partial validate-and-get-blocks-to-delete repo-url)
+                         :db-transact-fn (fn [tx-data tx-meta]
+                                           (db/transact! repo-url tx-data tx-meta))
                          :extract-options (merge
                                            {:user-config (state/get-config)
                                             :date-formatter (state/get-date-formatter)

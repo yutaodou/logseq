@@ -77,7 +77,8 @@ Options available:
   which may be referenced elsewhere.
 * :skip-db-transact? - Boolean which skips transacting in order to batch transactions. Default is false
 * :extract-options - Options map to pass to extract/extract"
-  [conn file content {:keys [new? delete-blocks-fn extract-options skip-db-transact?]
+  [conn file content {:keys [new? delete-blocks-fn db-transact-fn
+                             extract-options skip-db-transact?]
                       :or {new? true
                            delete-blocks-fn (constantly [])
                            skip-db-transact? false}
@@ -114,7 +115,6 @@ Options available:
               block-ids (set/union (set block-ids) (set block-refs-ids))
               pages (extract/with-ref-pages pages blocks)
               pages-index (map #(select-keys % [:block/name]) pages)]
-              ;; does order matter?
           {:tx (concat file-content pages-index delete-blocks pages block-ids blocks)
            :ast ast})
         tx (concat tx [(cond-> {:file/path file
@@ -123,8 +123,12 @@ Options available:
                          ;; TODO: use file system timestamp?
                          (assoc :file/created-at (date-time-util/time-ms)))])
         tx' (gp-util/remove-nils tx)
-        result (if skip-db-transact?
+        result (cond
+                 skip-db-transact?
                  tx'
+                 db-transact-fn
+                 (db-transact-fn tx' (select-keys options [:new-graph? :from-disk?]))
+                 :else
                  (d/transact! conn tx' (select-keys options [:new-graph? :from-disk?])))]
     {:tx result
      :ast ast}))

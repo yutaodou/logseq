@@ -3,7 +3,6 @@
   messages from electron's main process"
   (:require [cljs-bean.core :as bean]
             [clojure.string :as string]
-            [datascript.core :as d]
             [dommy.core :as dom]
             [electron.ipc :as ipc]
             [frontend.config :as config]
@@ -119,8 +118,7 @@
                      (fn [data]
                        (let [{:keys [graph tx-data]} (bean/->clj data)
                              tx-data (db/string->db (:data tx-data))]
-                         (when-let [conn (db/get-db graph false)]
-                           (d/transact! conn tx-data {:dbsync? true}))
+                         (db/transact! graph tx-data {:dbsync? true})
                          (ui-handler/re-render-root!))))
 
   (js/window.apis.on "persistGraph"

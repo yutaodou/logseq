@@ -1,8 +1,8 @@
 (ns frontend.modules.outliner.datascript
   #?(:clj (:require [clojure.core :as core]))
   #?(:cljs (:require-macros [frontend.modules.outliner.datascript]))
-  #?(:cljs (:require [datascript.core :as d]
-                     [frontend.db.conn :as conn]
+  #?(:cljs (:require [frontend.db.conn :as conn]
+                     [frontend.db :as db]
                      [frontend.modules.outliner.pipeline :as pipelines]
                      [frontend.modules.editor.undo-redo :as undo-redo]
                      [frontend.state :as state]
@@ -23,7 +23,7 @@
 
 #?(:cljs
    (defn after-transact-pipelines
-     [repo {:keys [_db-before _db-after _tx-data _tempids tx-meta] :as tx-report}]
+     [repo {:keys [tx-meta] :as tx-report}]
      (when-not config/test?
        (pipelines/invoke-hooks tx-report)
 
@@ -62,20 +62,8 @@
            (let [repo (get opts :repo (state/get-current-repo))
                  conn (conn/get-db repo false)
                  editor-cursor (state/get-current-edit-block-and-position)
-                 meta (merge opts {:editor-cursor editor-cursor})
-                 rs (d/transact! conn txs (assoc meta :outliner/transact? true))]
-             (when true                 ; TODO: add debug flag
-               (let [eids (distinct (mapv first (:tx-data rs)))
-                     left&parent-list (->>
-                                       (d/q '[:find ?e ?l ?p
-                                              :in $ [?e ...]
-                                              :where
-                                              [?e :block/left ?l]
-                                              [?e :block/parent ?p]] @conn eids)
-                                       (vec)
-                                       (map next))]
-                 (assert (= (count left&parent-list) (count (distinct left&parent-list))) eids)))
-             rs)
+                 meta (merge opts {:editor-cursor editor-cursor})]
+             (db/transact! repo txs (assoc meta :outliner/transact? true)))
            (catch :default e
              (log/error :exception e)
              (throw e)))))))
