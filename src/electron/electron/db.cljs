@@ -3,7 +3,8 @@
             [electron.utils :as utils]
             [electron.db-schema :as schema]
             ["path" :as path]
-            [clojure.pprint :as pprint]))
+            [clojure.pprint :as pprint]
+            [cljs-bean.core :as bean]))
 
 (.init datahike)
 
@@ -25,10 +26,14 @@
       (.createDatabase datahike config)
       (transact-schema! repo))))
 
+(defn delete-database!
+  [repo]
+  (let [config (get-db-config repo)]
+    (when (.databaseExists datahike config)
+      (.deleteDatabase datahike config))))
+
 (defn transact!
   [repo tx-data-meta]
-  (prn {:repo repo})
-  (pprint/pprint tx-data-meta)
   (let [config (get-db-config repo)]
     (when-not (.databaseExists datahike config)
       (create-database! repo))
@@ -42,3 +47,17 @@
       :pull   (apply datahike/pull config args)
       :pull-many (apply datahike/pull-many config args)
       :query (apply datahike/query config args))))
+
+(comment
+  (def repo "logseq_local_/Users/tiensonqin/Desktop/db-demo")
+
+  (def config (get-db-config repo))
+
+  (datahike/query
+    (str
+     '[:find ?n
+       :where
+       [?e :block/page ?p]
+       [?p :block/name ?n]])
+    (bean/->js [["db", config]]))
+  )

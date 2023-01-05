@@ -29,7 +29,8 @@
             [cljs.reader :as reader]
             [electron.server :as server]
             [electron.find-in-page :as find]
-            [electron.db :as db]))
+            [electron.db :as db]
+            [clojure.edn :as edn]))
 
 (defmulti handle (fn [_window args] (keyword (first args))))
 
@@ -689,8 +690,9 @@
 (defmethod handle :server/set-config [^js _win [_ config]]
   (server/set-config! config))
 
-(defmethod handle :db/transact [^js _win [_ repo tx-data-meta]]
-  (db/transact! repo tx-data-meta)
+(defmethod handle :db/transact [^js _win [_ repo tx-data-meta-str]]
+  (let [tx-data-meta (edn/read-string tx-data-meta-str)]
+    (db/transact! repo tx-data-meta))
   nil)
 
 (defmethod handle :db/query [^js _win [_ repo kind & args]]
