@@ -58,7 +58,6 @@
   },
   "resolutions": {
     "**/electron": "19.1.8",
-    "**/node-gyp": "9.0.0",
-    "@logseq/datahike": "portal:/Users/tiensonqin/Codes/projects/datahike-rs"
+    "**/node-gyp": "9.0.0"
   }
 }
