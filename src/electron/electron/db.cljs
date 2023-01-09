@@ -44,9 +44,13 @@
 (defn query
   [repo kind args-str]
   (let [config (get-db-config repo)
+        query? (= kind :query)
         args (->> (edn/read-string args-str)
                   (map (fn [arg]
-                         (if (coll? arg) (pr-str arg) arg))))]
+                         (cond
+                           (and query? (= arg :logseq/db)) [["db" config]]
+                           (coll? arg) (pr-str arg)
+                           :else arg))))]
     (let [f (case kind
               :entity datahike/entity
               :pull datahike/pull

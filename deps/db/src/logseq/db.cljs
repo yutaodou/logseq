@@ -18,7 +18,7 @@
      (if transact-fn
        (do
          (transact-fn tx-data)
-         nil)
+         (atom :logseq/db))
        (let [db-conn (d/create-conn db-schema/schema)]
          (d/transact! db-conn tx-data)
          db-conn)))))
