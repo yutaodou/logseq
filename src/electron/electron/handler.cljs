@@ -695,8 +695,8 @@
     (db/transact! repo tx-data-meta))
   nil)
 
-(defmethod handle :db/query [^js _win [_ repo kind & args]]
-  (db/query repo kind args))
+(defmethod handle :db/query [^js _win [_ repo kind args]]
+  (db/query repo (keyword kind) args))
 
 (defn set-ipc-handler! [window]
   (let [main-channel "main"]

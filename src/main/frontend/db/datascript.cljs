@@ -19,4 +19,7 @@
       (d/pull-many db selector eids)))
   (entity [this eid]
     (when-let [db (conn/get-db repo)]
-      (d/entity db eid))))
+      (d/entity db eid)))
+  (datoms [this index col]
+    (when-let [db (conn/get-db repo)]
+      (apply d/datoms db index col))))

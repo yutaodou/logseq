@@ -4,7 +4,8 @@
             [electron.db-schema :as schema]
             ["path" :as path]
             [clojure.pprint :as pprint]
-            [cljs-bean.core :as bean]))
+            [cljs-bean.core :as bean]
+            [clojure.edn :as edn]))
 
 (.init datahike)
 
@@ -34,24 +35,29 @@
 
 (defn transact!
   [repo tx-data-meta]
-  (prn "transact!")
-  (clojure.pprint/pprint tx-data-meta)
-  (let [config (get-db-config repo)]
-    (when-not (.databaseExists datahike config)
-      (create-database! repo))
-    (.transact datahike config (pr-str tx-data-meta))))
+  (let [config (get-db-config repo)
+        exists? (.databaseExists datahike config)]
+    (if exists?
+      (.transact datahike config (pr-str tx-data-meta))
+      (create-database! repo))))
 
 (defn query
-  [repo kind args]
-  (let [config (get-db-config repo)]
-    (case kind
-      :entity (datahike/entity config (first args))
-      :pull   (apply datahike/pull config args)
-      :pull-many (apply datahike/pull-many config args)
-      :query (apply datahike/query config args))))
+  [repo kind args-str]
+  (let [config (get-db-config repo)
+        args (->> (edn/read-string args-str)
+                  (map (fn [arg]
+                         (if (coll? arg) (pr-str arg) arg))))]
+    (let [f (case kind
+              :entity datahike/entity
+              :pull datahike/pull
+              :pull-many datahike/pullMany
+              :query datahike/query
+              :datoms datahike/datoms)]
+      (when-let [result (apply f config args)]
+        (edn/read-string result)))))
 
 (comment
-  (def repo "logseq_local_/Users/tiensonqin/Desktop/db-demo")
+  (def repo "logseq_local_/Users/tiensonqin/Desktop/logseq-graphs/db-3")
 
   (def config (get-db-config repo))
 

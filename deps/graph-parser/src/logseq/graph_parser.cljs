@@ -92,7 +92,7 @@ Options available:
                                        :uri-encoded? false
                                        :filename-format :legacy}
                                       extract-options
-                                      {:db @conn})
+                                      {:db (when conn @conn)})
               {:keys [pages blocks ast]
                :or   {pages []
                       blocks []
@@ -105,7 +105,8 @@ Options available:
 
                 :else nil)
               block-ids (map (fn [block] {:block/uuid (:block/uuid block)}) blocks)
-              delete-blocks (delete-blocks-fn @conn (first pages) file block-ids)
+              delete-blocks (when conn
+                              (delete-blocks-fn @conn (first pages) file block-ids))
               block-refs-ids (->> (mapcat :block/refs blocks)
                                   (filter (fn [ref] (and (vector? ref)
                                                          (= :block/uuid (first ref)))))

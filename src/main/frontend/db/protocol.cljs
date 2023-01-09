@@ -5,4 +5,5 @@
   (q [this query inputs])
   (pull [this selector eid])
   (pull-many [this selector eids])
-  (entity [this eid]))
+  (entity [this eid])
+  (datoms [this index col]))

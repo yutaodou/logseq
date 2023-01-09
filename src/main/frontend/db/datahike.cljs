@@ -13,10 +13,12 @@
           opt-str (pr-str opt)]
       (ipc/ipc :db/transact repo opt-str)))
   (q [this query inputs]
-    (ipc/ipc :db/query repo :query inputs))
+    (ipc/ipc :db/query repo :query (pr-str inputs)))
   (pull [this selector eid]
-    (ipc/ipc :db/query repo :pull selector eid))
+    (ipc/ipc :db/query repo :pull (pr-str [selector eid])))
   (pull-many [this selector eids]
-    (ipc/ipc :db/query repo :pull-many selector eids))
+    (ipc/ipc :db/query repo :pull-many (pr-str [selector eids])))
   (entity [this eid]
-    (ipc/ipc :db/query repo :entity eid)))
+    (ipc/ipc :db/query repo :entity (pr-str [eid])))
+  (datoms [this index col]
+    (ipc/ipc :db/query repo :datoms (pr-str [index col]))))

@@ -30,4 +30,8 @@
 
 (defn pull-many
   [repo selector eids]
-  (protocol/pull (get-db repo) selector eids))
+  (protocol/pull-many (get-db repo) selector eids))
+
+(defn datoms
+  [repo index & col]
+  (apply protocol/datoms (get-db repo) repo index col))
