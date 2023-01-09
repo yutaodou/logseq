@@ -14,8 +14,7 @@
             [logseq.graph-parser.util.page-ref :as page-ref]
             [frontend.util :as util]
             [frontend.date :as date]
-            [lambdaisland.glogi :as log]
-            [clojure.pprint :as pprint]))
+            [lambdaisland.glogi :as log]))
 
 (defn resolve-input
   "Wrapper around db-util/resolve-input which provides editor-specific state"
