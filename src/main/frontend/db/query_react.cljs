@@ -14,7 +14,8 @@
             [logseq.graph-parser.util.page-ref :as page-ref]
             [frontend.util :as util]
             [frontend.date :as date]
-            [lambdaisland.glogi :as log]))
+            [lambdaisland.glogi :as log]
+            [clojure.pprint :as pprint]))
 
 (defn resolve-input
   "Wrapper around db-util/resolve-input which provides editor-specific state"
@@ -105,7 +106,7 @@
           inputs (cond-> resolved-inputs
                          rules
                          (conj rules))
-          k [:custom (or (:query-string query') query')]]
+          k [:custom (or (:query-string query') (assoc query' :inputs inputs))]]
       (pprint "inputs (post-resolution):" resolved-inputs)
       (pprint "query-opts:" query-opts)
       (pprint (str "time elapsed: " (.toFixed (- (.now js/performance) start-time) 2) "ms"))
