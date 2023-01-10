@@ -106,6 +106,7 @@
                          rules
                          (conj rules))
           k [:custom (or (:query-string query') (assoc query' :inputs resolved-inputs))]]
+      (prn :REACT-KEY k)
       (pprint "inputs (post-resolution):" resolved-inputs)
       (pprint "query-opts:" query-opts)
       (pprint (str "time elapsed: " (.toFixed (- (.now js/performance) start-time) 2) "ms"))

@@ -25,6 +25,7 @@ const consoleLogWatcher = (msg: ConsoleMessage) => {
   // console.log(msg.text())
   const text = msg.text()
   logs += text + '\n'
+  console.log("CONSOLE:", logs)
   expect(text, logs).not.toMatch(/^(Failed to|Uncaught)/)
 
   // youtube video

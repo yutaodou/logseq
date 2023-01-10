@@ -178,14 +178,14 @@ jobs:
         run: xvfb-run -- npx playwright test --reporter github --shard=1/2
         env:
           LOGSEQ_CI: true
-          DEBUG: "pw:api"
+          # DEBUG: "pw:api"
           RELEASE: true # skip dev only test
 
       - name: Run Playwright test - 2/2
         run: xvfb-run -- npx playwright test --reporter github --shard=2/2
         env:
           LOGSEQ_CI: true
-          DEBUG: "pw:api"
+          # DEBUG: "pw:api"
           RELEASE: true # skip dev only test
 
       - name: Save test artifacts
