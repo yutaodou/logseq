@@ -11,8 +11,7 @@
             [frontend.state :as state]
             [frontend.util :as util :refer [react]]
             [cljs.spec.alpha :as s]
-            [clojure.core.async :as async]
-            [cljs.cache :as cache]))
+            [clojure.core.async :as async]))
 
 ;;; keywords specs for reactive query, used by `react/q` calls
 ;; ::block
@@ -49,9 +48,8 @@
 
 ;; Query atom of map of Key ([repo q inputs]) -> atom
 ;; TODO: replace with LRUCache, only keep the latest 20 or 50 items?
-;; WIP: use a lru cache with very low capacity
 
-(defonce query-state (atom (cache/lru-cache-factory {} :threshold 1)))
+(defonce query-state (atom {}))
 
 (def ^:dynamic *query-component*)
 
