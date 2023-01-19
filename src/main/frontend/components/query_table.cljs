@@ -42,9 +42,9 @@
 (defn- locale-compare
   "Use locale specific comparison for strings and general comparison for others."
   [x y]
-    (if (and (number? x) (number? y))
-      (< x y)
-      (.localeCompare (str x) (str y) (state/sub :preferred-language) #js {:numeric true})))
+  (if (and (number? x) (number? y))
+    (< x y)
+    (.localeCompare (str x) (str y) (state/sub :preferred-language) #js {:numeric true})))
 
 (defn- sort-result [result {:keys [sort-by-column sort-desc? sort-nlp-date?]}]
   (if (some? sort-by-column)
@@ -129,6 +129,8 @@
           ;; as user needs to know if there result is sorted
           sort-state (get-sort-state current-block)
           result' (sort-result result sort-state)]
+      (println "query table cols" columns)
+      (println "query table rslt" result)
       [:div.overflow-x-auto {:on-mouse-down (fn [e] (.stopPropagation e))
                              :style {:width "100%"}
                              :class (when-not page? "query-table")}
@@ -137,9 +139,9 @@
          [:tr.cursor
           (for [column columns]
             (let [title (if (and (= column :clock-time) (integer? clock-time-total))
-                             (util/format "clock-time(total: %s)" (clock/seconds->days:hours:minutes:seconds
-                                                                   clock-time-total))
-                             (name column))]
+                            (util/format "clock-time(total: %s)" (clock/seconds->days:hours:minutes:seconds
+                                                                  clock-time-total))
+                            (name column))]
               (sortable-title title column sort-state (:block/uuid current-block))))]]
         [:tbody
          (for [item result']
