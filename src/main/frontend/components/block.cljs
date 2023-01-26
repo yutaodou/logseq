@@ -2959,48 +2959,47 @@
 
 (defn table
   [config {:keys [header groups col_groups] :as data}]
-  (println "block table conf" (pr-str config))
-  (println "block table data" (pr-str data))
-  (shui/table groups {:cols header
-                      :inline config})) 
-  ; (let [tr (fn [elm cols]
-  ;            (->elem
-  ;             :tr
-  ;             (mapv (fn [col]
-  ;                     (->elem
-  ;                      elm
-  ;                      {:scope "col"
-  ;                       :class "org-left"}
-  ;                      (map-inline config col)))
-  ;                   cols)))
-  ;       tb-col-groups (try
-  ;                       (mapv (fn [number]
-  ;                               (let [col-elem [:col {:class "org-left"}]]
-  ;                                 (->elem
-  ;                                  :colgroup
-  ;                                  (repeat number col-elem))))
-  ;                             col_groups)
-  ;                       (catch :default _e
-  ;                         []))
-  ;       head (when header
-  ;              [:thead (tr :th header)])
-  ;       groups (mapv (fn [group]
-  ;                      (->elem
-  ;                       :tbody
-  ;                       (mapv #(tr :td %) group)))
-  ;                    groups)]
-  ;   [:div.table-wrapper
-  ;    (->elem
-  ;     :table
-  ;     {:class "table-auto"
-  ;      :border 2
-  ;      :cell-spacing 0
-  ;      :cell-padding 6
-  ;      :rules "groups"
-  ;      :frame "hsides"}
-  ;     (vec-cat
-  ;      tb-col-groups
-  ;      (cons head groups)))]))
+  (case (get-in config [:block :block/properties :table/version])
+    2 (shui/table groups {:cols header
+                          :block (get-in config [:block])})
+    (let [tr (fn [elm cols]
+               (->elem
+                :tr
+                (mapv (fn [col]
+                        (->elem
+                         elm
+                         {:scope "col"
+                          :class "org-left"}
+                         (map-inline config col)))
+                      cols)))
+          tb-col-groups (try
+                          (mapv (fn [number]
+                                  (let [col-elem [:col {:class "org-left"}]]
+                                    (->elem
+                                     :colgroup
+                                     (repeat number col-elem))))
+                                col_groups)
+                          (catch :default _e
+                            []))
+          head (when header
+                 [:thead (tr :th header)])
+          groups (mapv (fn [group]
+                         (->elem
+                          :tbody
+                          (mapv #(tr :td %) group)))
+                       groups)]
+      [:div.table-wrapper
+       (->elem
+        :table
+        {:class "table-auto"
+         :border 2
+         :cell-spacing 0
+         :cell-padding 6
+         :rules "groups"
+         :frame "hsides"}
+        (vec-cat
+         tb-col-groups
+         (cons head groups)))])))
 
 (defn logbook-cp
   [log]
@@ -3149,6 +3148,8 @@
         built-in? (built-in-custom-query? title)
         page-list? (and (seq result)
                         (:block/name (first result)))
+        table-version (when (or page-list? table?) 
+                        (get-in current-block [:block/properties :table/version]))
         nested-query? (:custom-query? config)]
     (if nested-query?
       [:code (if dsl-query?
@@ -3215,6 +3216,26 @@
                                 [:div "Custom view failed: "
                                  (str error)]))]
                  (util/hiccup-keywordize result))
+
+               (= table-version 2)
+               (let [cols (query-table/get-columns current-block result {:page? page-list?})]
+                 (shui/table (->> (tree/filter-top-level-blocks result) 
+                                  (map (fn [block-or-page] 
+                                         (map (fn [col] 
+                                                (when (= col :design-system)
+                                                  (prn :block-or-page (pr-str block-or-page)))
+                                                (case col 
+                                                  :block (or (get-in block-or-page [:block/page :block/original-name]) 
+                                                             (get-in block-or-page [:block/content]))
+                                                  :page (or (get-in block-or-page [:block/original-name])
+                                                            (get-in block-or-page [:block/content]))
+                                                  (or (get-in block-or-page [:block/properties col])
+                                                      (get-in block-or-page [:block/properties-text-values col])
+                                                      (get-in block-or-page [(keyword :block col)]))))
+                                              cols)))
+                                  (conj []))
+                             {:cols cols
+                              :block (get-in config [:block])}))
 
                page-list?
                (query-table/result-table config current-block result {:page? true} map-inline page-cp ->elem inline-text)

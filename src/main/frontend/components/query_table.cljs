@@ -97,7 +97,7 @@
         keys (if page? (distinct (concat keys [:created-at :updated-at])) keys)]
     keys))
 
-(defn- get-columns [current-block result {:keys [page?]}]
+(defn get-columns [current-block result {:keys [page?]}]
   (let [query-properties (some-> (get-in current-block [:block/properties :query-properties] "")
                                  (common-handler/safe-read-string "Parsing query properties failed"))
         columns (if (seq query-properties)
@@ -129,8 +129,6 @@
           ;; as user needs to know if there result is sorted
           sort-state (get-sort-state current-block)
           result' (sort-result result sort-state)]
-      (println "query table cols" columns)
-      (println "query table rslt" result)
       [:div.overflow-x-auto {:on-mouse-down (fn [e] (.stopPropagation e))
                              :style {:width "100%"}
                              :class (when-not page? "query-table")}
