@@ -1,7 +1,7 @@
 (ns frontend.shui.table
   (:require 
     [clojure.string :as str]
-    [frontend.shui.inline :refer [map-inline]]
+    [frontend.shui.util :refer [use-ref-bounding-client-rect use-dom-bounding-client-rect $main-content] :as util]
     [frontend.date :refer [int->local-time-2]]
     [rum.core :as rum]))
 
@@ -9,6 +9,7 @@
 ;  [["Emphasis" [["Italic"] [["Plain" "B"]]]]]]
 
 (def BORDER_WIDTH 0.25)
+(def MAX_WIDTH 50)
 (def COLORS #{"tomato" "red" "crimson" "pink" "plum" "purple" "violet" "indigo" "blue" "sky" "cyan" "teal" "mint" "green" "grass" "lime" "yellow" "amber" "orange" "brown"})
 
 (defn color->gray [color]
@@ -112,8 +113,7 @@
   (last-str [["Plain" "A"] 
              [["Emphasis" [["Italic"] [["Plain" "B"]]]]]]))
 
-(defn print-or-map-inline [inline? data]
-  (println :print-or-map-inline (pr-str inline?) (sequential? inline?))
+(defn print-or-map-inline [{:keys [map-inline]} inline? data]
   (cond 
     (sequential? inline?) (map-inline data inline?)
     (string? inline?) inline?
@@ -123,8 +123,8 @@
                         date inline?)))
     
 
-(rum/defcs table-header < rum/reactive 
-  [state data {:keys [inline order template cell-x cell-y cursor-x cursor-y max-cell-x hover gray color hover-color? borders?] :as _config}]
+(rum/defc table-header
+  [data {:keys [inline order template cell-x cell-y cursor-x cursor-y max-cell-x hover gray color hover-color? borders?] :as _config}]
   (let [highlight? (case hover 
                      ("col" "all") (= cell-x cursor-x) 
                      "cell" (= [cell-x cell-y] [cursor-x cursor-y])
@@ -133,6 +133,7 @@
     [:div.py-2.px-2.text-xs.font-semibold.tracking-wider.uppercase.bg-gradient-to-b
      {:style {:order order
               :min-width (str (min 20 (:min template)) "rem")
+              :max-width (str MAX_WIDTH "rem")
               :box-sizing :border-box
               :box-shadow (when borders? "0 0 0 1px var(--tw-shadow-color)")}
       :class (str (if highlight? (rdx highlight-color 5) (rdx color 4))
@@ -146,10 +147,10 @@
                         :else "")
                   " " 
                   (rdx "shadow" color 7))}
-     (print-or-map-inline data inline)]))
+     (print-or-map-inline _config data inline)]))
 
-(rum/defcs table-cell < rum/reactive
-  [state data {:keys [inline order template cell-x cell-y max-cell-x max-cell-y cursor-x cursor-y striped? set-cursor! hover color gray hover-color?] :as _config}]
+(rum/defc table-cell 
+  [data {:keys [inline order template cell-x cell-y max-cell-x max-cell-y cursor-x cursor-y striped? set-cursor hover color gray hover-color?] :as _config}]
   (let [first-col? (= 0 cell-x) 
         last-col? (= cell-x max-cell-x)
         last-row? (= cell-y max-cell-y)
@@ -165,25 +166,35 @@
                    (and striped? (even? cell-y)) (rdx gray 2)
                    :else (rdx gray 1))]
     [:div.py-2.px-2
-     {:style {:order order}
+     {:style {:order order
+              :max-width (str MAX_WIDTH "rem")}
               ; :max-width (str (:min template) "rem")}} 
       :class (cond-> bg-color
                (and last-row? first-col?) (str " rounded-bl") 
                (and last-row? last-col?) (str " rounded-br"))
-      :on-pointer-enter #(set-cursor! cell-x cell-y)}
-     (print-or-map-inline data inline)]))
+      :on-pointer-enter #(set-cursor [cell-x cell-y])}
+     (print-or-map-inline _config data inline)]))
 
 ;; We have a list of columns that the data relates to
 ;; We than have a list of rows with lists of data pertaining to the columns 
 ;; We then have an ordered list of columns to show 
 ;; For each row, we want to show columns in that order
 
+; [[[1 2 3] 
+;   [4 5 6] 
+;   [7 8 9]]
+;  [[1 2 3] 
+;   [4 5 6] 
+;   [7 8 9]]]
 
-(rum/defcs table < rum/reactive (rum/local [] ::cursor)
-  [state data {:keys [cols] :as config}]
-  (println "shui cols" (pr-str cols))
-  (println "shui data" (pr-str data))
-  (let [display-cols (map str/lower-case (or (some-> (get-in config [:block :block/properties :table/cols]) 
+(rum/defc table
+  [data {:keys [cols] :as config}]
+  ; (println "shui cols" (pr-str cols))
+  ; (println "shui data" (pr-str data))
+  (let [[[cursor-x cursor-y] set-cursor] (rum/use-state [])
+        [root-ref root-rect] (use-ref-bounding-client-rect)
+        main-content-rect (use-dom-bounding-client-rect ($main-content))
+        display-cols (map str/lower-case (or (some-> (get-in config [:block :block/properties :table/cols]) 
                                                      (str/split #", ?"))
                                              (map last-str cols)))
         template-cols (volatile! (mapv (fn [inline] {:width nil :min (count (last-str inline)) :max nil}) display-cols))
@@ -193,19 +204,22 @@
         color (get COLORS (get-in config [:block :block/properties :table/color]) "grass")
         hover-color? (get-in config [:block :block/properties :table/hover-color])
         gray (color->gray color)
-        [cursor-x cursor-y] @(::cursor state)
-        set-cursor! (fn [x y] (reset! (::cursor state) [x y]))
         _ (doall
-            (for [[group-index group-data] (map-indexed vector data) 
-                  [row-index row-data] (map-indexed vector group-data)
-                  [col-index col-data] (map-indexed vector row-data) 
-                  :let [default-col (nth cols col-index)
-                        default-col-name (last-str default-col)
-                        display-col-index (.indexOf display-cols default-col-name)] 
-                  :when (>= display-col-index 0)
-                  :let [order (+ (* (count display-cols) (inc row-index) (inc group-index)) display-col-index)
-                        _ (vswap! template-cols update-in [display-col-index :min] max (count (str/lower-case (last-str col-data))))]] 
-              nil))
+            (let [cell-index (volatile! (count display-cols))]
+              (for [[group-index group-data] (map-indexed vector data) 
+                    [row-index row-data] (map-indexed vector group-data)
+                    [col-index col-data] (map-indexed vector row-data) 
+                    :let [default-col (nth cols col-index)
+                          default-col-name (last-str default-col)
+                          display-col-index (.indexOf display-cols (str/lower-case default-col-name)) 
+                          cell-index' @cell-index
+                          cell-y (quot cell-index' (count display-cols))
+                          cell-x display-col-index] 
+                    :when (>= display-col-index 0)
+                    :let [order (+ (* cell-y (count display-cols)) cell-x)
+                          _ (js/console.log "shui order" (last-str col-data) order (str (count display-cols) " + " (inc group-index) " * " (inc row-index) " + " col-index)) 
+                          _ (vswap! template-cols update-in [display-col-index :min] max (count (str/lower-case (last-str col-data))))]] 
+                (vswap! cell-index inc))))
         template-cols @template-cols
         max-cell-x (count display-cols)
         max-cell-y (reduce + 0 (map count data)) 
@@ -244,7 +258,7 @@
                                                  :cursor-y cursor-y
                                                  :max-cell-x max-cell-x 
                                                  :max-cell-y max-cell-y
-                                                 :set-cursor! set-cursor!
+                                                 :set-cursor set-cursor
                                                  :col default-col
                                                  :col-index col-index 
                                                  :group-index group-index
@@ -256,14 +270,41 @@
                                                  :color color 
                                                  :gray gray
                                                  :hover-color? hover-color?)))
-        grid-template-columns (str "repeat(" (count display-cols) ", auto)")]
-    [:div.overflow-x-auto
-     [:div.grid.rounded.border {:style {:grid-template-columns grid-template-columns
-                                        :gap (when borders? "1px")} 
-                                ; :class (str (rdx color 5) " " (rdx "border" color 5))
-                                :class (str (rdx gray 7) " " (rdx "border" gray 7))
-                                :data-grid-template-columns grid-template-columns
-                                :on-pointer-leave #(set-cursor! nil nil)}
-      ; [:div.bg-gradient-to-r.rounded-t.h-2.-ml-px.-mt-px.-mr-px {:style {:grid-column "1 / -1"} 
-      ;                                                            :class (color->bar color)}]
-      (concat headers cells)]]))
+        total-col-min-widths-px (->> (map :min template-cols) 
+                                     (map #(min 30 %)) 
+                                     (reduce +) 
+                                     util/rem->px)
+        _ (js/console.log "shui total-col-min-widths" 
+                          (pr-str total-col-min-widths-px) 
+                          (pr-str (map :min template-cols)))
+                          ; "root-rect" (clj->js root-rect)
+                          ; "main-rect" (clj->js main-content-rect))
+        ;; TODO: Have a fractional unit one if we want smaller tables to expand?
+        grid-template-columns (str "repeat(" (count display-cols) ", auto)")
+
+        left-adjustment (- (:left root-rect) (:left main-content-rect))
+        right-adjustment (- (:width main-content-rect) 
+                            (- (:right root-rect) (:left main-content-rect)))]
+        
+    [:div.border-2.border-red-500 {:ref root-ref}
+     [:div.opacity-50 {:style {:width (:width main-content-rect)
+                               :margin-left (- (:left main-content-rect) (:left root-rect))
+                               :padding-left left-adjustment
+                               :padding-right right-adjustment
+                               :overflow-x "scroll"}}
+                               ; :transform (str "translateX(calc(-50% + 300px))")}
+      ; [:div (pr-str root-rect)]
+      [:div.grid.rounded.border {:style {:grid-template-columns grid-template-columns
+                                         :gap (when borders? "1px")
+                                         ; :width (some-> root-rect :width (< total-col-min-widths-px) (and total-col-min-widths-px))
+                                         ; :width   total-col-min-widths-px
+                                         :width (when (and (:width root-rect) 
+                                                           (< (:width root-rect) total-col-min-widths-px))
+                                                  total-col-min-widths-px)}
+                                 ; :class (str (rdx color 5) " " (rdx "border" color 5))
+                                 :class (str (rdx gray 7) " " (rdx "border" gray 7))
+                                 :data-grid-template-columns grid-template-columns
+                                 :on-pointer-leave #(set-cursor [])}
+       ; [:div.bg-gradient-to-r.rounded-t.h-2.-ml-px.-mt-px.-mr-px {:style {:grid-column "1 / -1"} 
+       ;                                                            :class (color->bar color)}]
+       (concat headers cells)]]]))

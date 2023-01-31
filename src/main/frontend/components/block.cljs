@@ -2961,7 +2961,10 @@
   [config {:keys [header groups col_groups] :as data}]
   (case (get-in config [:block :block/properties :table/version])
     2 (shui/table groups {:cols header
-                          :block (get-in config [:block])})
+                          :block (get-in config [:block])
+                          :inline-block (shui/inline->inline-block inline)
+                          :map-inline (shui/inline->map-inline-block inline)
+                          :->elem ->elem}) 
     (let [tr (fn [elm cols]
                (->elem
                 :tr
