@@ -135,7 +135,9 @@
               :min-width (str (min 20 (:min template)) "rem")
               :max-width (str MAX_WIDTH "rem")
               :box-sizing :border-box
-              :box-shadow (when borders? "0 0 0 1px var(--tw-shadow-color)")}
+              :box-shadow (when borders? "0 0 0 1px var(--tw-shadow-color)")
+              :position :sticky
+              :top 0}
       :class (str (if highlight? (rdx highlight-color 5) (rdx color 4))
                   " " 
                   ; (color->header-gradient color)
@@ -287,7 +289,7 @@
                             (- (:right root-rect) (:left main-content-rect)))]
         
     [:div.border-2.border-red-500 {:ref root-ref}
-     [:div.opacity-50 {:style {:width (:width main-content-rect)
+     [:div.opacity-70 {:style {:width (:width main-content-rect)
                                :margin-left (- (:left main-content-rect) (:left root-rect))
                                :padding-left left-adjustment
                                :padding-right right-adjustment
