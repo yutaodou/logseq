@@ -42,7 +42,8 @@
     "abort-controller": "3.0.0",
     "fastify": "latest",
     "@fastify/cors": "8.2.0",
-    "command-exists": "1.2.9"
+    "command-exists": "1.2.9",
+    "md5-file": "5.0.0"
   },
   "devDependencies": {
     "@electron-forge/cli": "^6.0.4",

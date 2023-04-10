@@ -28,6 +28,7 @@
             [electron.state :as state]
             [electron.utils :as utils]
             [electron.window :as win]
+            [electron.assets :as assets]
             [promesa.core :as p]))
 
 (defmulti handle (fn [_window args] (keyword (first args))))
@@ -460,6 +461,9 @@
       (when (fs-extra/pathExistsSync assets-path)
         (p/let [^js files (js-utils/getAllFiles assets-path (clj->js exts))]
           files)))))
+
+(defmethod handle :md5File [^js _win [_ file-path]]
+  (assets/get-md5-by-file-path file-path))
 
 (defn close-watcher-when-orphaned!
   "When it's the last window for the directory, close the watcher."

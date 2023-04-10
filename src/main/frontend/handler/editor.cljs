@@ -3,6 +3,7 @@
             [clojure.string :as string]
             [clojure.walk :as w]
             [dommy.core :as dom]
+            [electron.ipc :as ipc]
             [frontend.commands :as commands]
             [frontend.config :as config]
             [frontend.date :as date]
@@ -1465,7 +1466,6 @@
             dir (or (:dir matched-alias) repo-dir)]
         (if (util/electron?)
           (let [from (not-empty (.-path file))]
-
             (js/console.debug "Debug: Copy Asset #" dir file-rpath from)
             (-> (js/window.apis.copyFileToAssets dir file-rpath from)
                 (p/then
