@@ -76,31 +76,32 @@
 
 (defn transact!
   [txs tx-meta {:keys [repo conn unlinked-graph? set-state-fn]}]
-  (let [db-based? (and repo (sqlite-util/db-based-graph? repo))
-        txs (map (fn [m]
-                   (if (map? m)
-                     (dissoc m :block/children :block/meta :block/top? :block/bottom? :block/anchor
-                             :block/title :block/body :block/level :block/container :db/other-tx
-                             :block/unordered)
-                     m)) txs)
-        txs (remove-nil-from-transaction txs)
-        txs (cond-> txs
-              (= :delete-blocks (:outliner-op tx-meta))
-              (update-refs-and-macros @conn repo tx-meta set-state-fn)
+  (when (seq txs)
+    (let [db-based? (and repo (sqlite-util/db-based-graph? repo))
+          txs (map (fn [m]
+                     (if (map? m)
+                       (dissoc m :block/children :block/meta :block/top? :block/bottom? :block/anchor
+                               :block/title :block/body :block/level :block/container :db/other-tx
+                               :block/unordered)
+                       m)) txs)
+          txs (remove-nil-from-transaction txs)
+          txs (cond-> txs
+                (= :delete-blocks (:outliner-op tx-meta))
+                (update-refs-and-macros @conn repo tx-meta set-state-fn)
 
-              true
-              (distinct))]
+                true
+                (distinct))]
 
-    (when (and (seq txs)
-               (or db-based?
-                   (and (fn? unlinked-graph?) (not (unlinked-graph?)))
-                   (exists? js/process)))
+      (when (and (seq txs)
+                 (or db-based?
+                     (and (fn? unlinked-graph?) (not (unlinked-graph?)))
+                     (exists? js/process)))
 
       ;; (prn :debug "DB transact")
       ;; (cljs.pprint/pprint txs)
 
-      (try
-        (ldb/transact! conn txs (assoc tx-meta :outliner/transact? true))
-        (catch :default e
-          (js/console.error e)
-          (throw e))))))
+        (try
+          (ldb/transact! conn txs (assoc tx-meta :outliner/transact? true))
+          (catch :default e
+            (js/console.error e)
+            (throw e)))))))

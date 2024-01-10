@@ -1081,13 +1081,23 @@
   "Stores transaction args which can be fetched in all op-transact functions."
   nil)
 
+(defonce *batch-transacting? (atom false))
+
+(defonce *transaction-data (atom []))
+
+(defonce *transaction-opts (atom {}))
+
+(defn finish-batch-transact!
+  []
+  (reset! *transaction-data [])
+  (reset! *transaction-opts {})
+  (reset! *batch-transacting? false))
+
 (defn- op-transact!
   [fn-var & args]
   {:pre [(var? fn-var)]}
-  (when (nil? *transaction-data*)
-    (throw (js/Error. (str (:name (meta fn-var)) " is not used in (transact! ...)"))))
   (let [result (apply @fn-var args)]
-    (conj! *transaction-data* (select-keys result [:tx-data :tx-meta]))
+    (swap! *transaction-data conj (select-keys result [:tx-data :tx-meta]))
     result))
 
 (defn save-block!

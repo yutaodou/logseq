@@ -17,7 +17,8 @@
    [frontend.handler.file-based.property.util :as property-util]
    [frontend.handler.property.util :as pu]
    [dommy.core :as dom]
-   [goog.object :as gobj]))
+   [goog.object :as gobj]
+   [promesa.core :as p]))
 
 ;;  Fns
 
