@@ -2,7 +2,6 @@
   "Git related handler fns"
   (:require [clojure.string :as string]
             [electron.ipc :as ipc]
-            [frontend.config :as config]
             [frontend.db :as db]
             [frontend.handler.notification :as notification]
             [frontend.state :as state]
