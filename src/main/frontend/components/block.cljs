@@ -1826,26 +1826,7 @@
              :width "100%"
              :z-index 3}}]])
 
-(defn block-checkbox
-  [block class]
-  (let [marker (:block/marker block)
-        [class checked?] (cond
-                           (nil? marker)
-                           nil
-                           (contains? #{"NOW" "LATER" "DOING" "IN-PROGRESS" "TODO" "WAIT" "WAITING"} marker)
-                           [class false]
-                           (= "DONE" marker)
-                           [(str class " checked") true])]
-    (when class
-      (ui/checkbox {:class class
-                    :style {:margin-right 5}
-                    :checked checked?
-                    :on-mouse-down (fn [e]
-                                     (util/stop-propagation e))
-                    :on-change (fn [_e]
-                                 (if checked?
-                                   (editor-handler/uncheck block)
-                                   (editor-handler/check block)))}))))
+
 
 (defn list-checkbox
   [config checked?]
@@ -1859,22 +1840,47 @@
                    (editor-handler/toggle-list-checkbox block item-content)))}))
 
 (defn marker-switch
+  "The TODO marker switch compponent with checkbox"
   [{:block/keys [marker] :as block}]
-  (when (contains? #{"NOW" "LATER" "TODO" "DOING"} marker)
+  (when (contains? #{"NOW" "LATER" "TODO" "DOING" "DONE"} marker)
     (let [set-marker-fn (fn [new-marker]
                           (fn [e]
                             (util/stop e)
-                            (editor-handler/set-marker block new-marker)))
+                            (when new-marker
+                              (editor-handler/set-marker block new-marker))))
+          ;; clicking marker goes to the next state
           next-marker (case marker
                         "NOW" "LATER"
                         "LATER" "NOW"
                         "TODO" "DOING"
-                        "DOING" "TODO")]
-      [:a
-       {:class (str "marker-switch block-marker " marker)
-        :title (util/format "Change from %s to %s" marker next-marker)
-        :on-mouse-down (set-marker-fn next-marker)}
-       marker])))
+                        "DOING" "TODO"
+                        "DONE" nil)
+          ;; toggling the checkbox goes to the opposite of the current state
+          toggle-marker (case marker
+                          "DONE" (if (= :now (state/get-preferred-workflow))
+                                   "LATER"
+                                   "TODO")
+                          "DONE")
+          class "mr-1 cursor"
+          [class checked?] (cond
+                             (nil? marker)
+                             nil
+                             (contains? #{"NOW" "LATER" "DOING" "IN-PROGRESS" "TODO" "WAIT" "WAITING"} marker)
+                             [class false]
+                             (= "DONE" marker)
+                             [(str class " checked") true])]
+      [(ui/checkbox {:class class
+                     :style {:margin-right 5}
+                     :checked checked?
+                     :on-change (fn [_]
+                                  ;; do not stop-propagation here, otherwise the checkbox will not be checked
+                                  (editor-handler/set-marker block toggle-marker))})
+
+       (when-not checked? [:a
+                           {:class (str "marker-switch block-marker " marker)
+                            :title (util/format "Change from %s to %s" marker next-marker)
+                            :on-mouse-down (set-marker-fn next-marker)}
+                           marker])])))
 
 (defn marker-cp
   [{:block/keys [pre-block? marker] :as _block}]
@@ -1935,9 +1941,6 @@
         block-ref? (:block-ref? config)
         block-type (or (keyword (:ls-type properties)) :default)
         html-export? (:html-export? config)
-        checkbox (when (and (not pre-block?)
-                            (not html-export?))
-                   (block-checkbox t (str "mr-1 cursor")))
         marker-switch (when (and (not pre-block?)
                                  (not html-export?))
                         (marker-switch t))
@@ -2000,8 +2003,7 @@
                         (pdf-assets/area-display t))])]
        (remove-nils
         (concat
-         [(when-not slide? checkbox)
-          (when-not slide? marker-switch)
+         [(when-not slide? marker-switch)
           marker-cp
           priority]
 
