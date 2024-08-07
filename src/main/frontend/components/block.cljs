@@ -11,6 +11,7 @@
             [dommy.core :as dom]
             [frontend.commands :as commands]
             [frontend.components.block.macros :as block-macros]
+            [frontend.components.block-effects :as block-effects]
             [frontend.components.file-based.block :as file-block]
             [frontend.components.datetime :as datetime-comp]
             [frontend.components.lazy-editor :as lazy-editor]
@@ -2971,6 +2972,7 @@
   [state container-state repo config* block {:keys [navigating-block navigated?]}]
   (let [*ref (::ref state)
         _ (when (:block/uuid block) (state/sub-async-query-loading (:block/uuid block)))
+        block-cp (:rum/react-component state)
         [original-block block] (build-block config* block {:navigating-block navigating-block :navigated? navigated?})
         config* (if original-block
                   (assoc config* :original-block original-block)
@@ -3015,106 +3017,108 @@
         own-number-list? (:own-order-number-list? config)
         order-list? (boolean own-number-list?)
         children (ldb/get-children block)
-        selected? (contains? (set (state/get-selection-block-ids)) (:block/uuid block))
+        selected? (contains? (set (state/get-selection-block-ids)) uuid)
         db-based? (config/db-based-graph? repo)]
-    [:div.ls-block
-     (cond->
-      {:id (str "ls-block-" uuid)
-       :blockid (str uuid)
-       :containerid container-id
-       :ref #(when (nil? @*ref) (reset! *ref %))
-       :data-collapsed (and collapsed? has-child?)
-       :class (str "id" uuid " "
-                   (when selected? " selected")
-                   (when pre-block? " pre-block")
-                   (when order-list? " is-order-list")
-                   (when (string/blank? title) " is-blank")
-                   (when original-block " embed-block"))
-       :haschild (str (boolean has-child?))}
+    [:<>
+     (block-effects/block-effects-observer block-cp (str uuid) editing?)
+     [:div.ls-block
+      (cond->
+        {:id (str "ls-block-" uuid)
+         :blockid (str uuid)
+         :containerid container-id
+         :ref #(when (nil? @*ref) (reset! *ref %))
+         :data-collapsed (and collapsed? has-child?)
+         :class (str "id" uuid " "
+                  (when selected? " selected")
+                  (when pre-block? " pre-block")
+                  (when order-list? " is-order-list")
+                  (when (string/blank? title) " is-blank")
+                  (when original-block " embed-block"))
+         :haschild (str (boolean has-child?))}
 
-       original-block
-       (assoc :originalblockid (str (:block/uuid original-block)))
+        original-block
+        (assoc :originalblockid (str (:block/uuid original-block)))
 
-       level
-       (assoc :level level)
+        level
+        (assoc :level level)
 
-       (not slide?)
-       (merge attrs)
+        (not slide?)
+        (merge attrs)
 
-       (or reference? embed?)
-       (assoc :data-transclude true)
+        (or reference? embed?)
+        (assoc :data-transclude true)
 
-       embed?
-       (assoc :data-embed true)
+        embed?
+        (assoc :data-embed true)
 
-       custom-query?
-       (assoc :data-query true))
+        custom-query?
+        (assoc :data-query true))
 
-     (when (and ref? breadcrumb-show? (not table?))
-       (breadcrumb config repo uuid {:show-page? false
-                                     :indent? true
-                                     :navigating-block *navigating-block}))
+      (when (and ref? breadcrumb-show? (not table?))
+        (breadcrumb config repo uuid {:show-page? false
+                                      :indent? true
+                                      :navigating-block *navigating-block}))
 
-     ;; only render this for the first block in each container
-     (when (and top? (not table?))
-       (dnd-separator-wrapper block children block-id slide? true false))
+      ;; only render this for the first block in each container
+      (when (and top? (not table?))
+        (dnd-separator-wrapper block children block-id slide? true false))
 
-     [:div.block-main-container.flex.flex-row.pr-2.gap-1
-      {:data-has-heading (some-> block :block/properties (pu/lookup :logseq.property/heading))
-       :on-touch-start (fn [event uuid] (block-handler/on-touch-start event uuid))
-       :on-touch-move (fn [event]
-                        (block-handler/on-touch-move event block uuid editing? *show-left-menu? *show-right-menu?))
-       :on-touch-end (fn [event]
-                       (block-handler/on-touch-end event block uuid *show-left-menu? *show-right-menu?))
-       :on-touch-cancel (fn [_e]
-                          (block-handler/on-touch-cancel *show-left-menu? *show-right-menu?))
-       :on-mouse-enter (fn [e]
-                         (block-mouse-over e *control-show? block-id doc-mode?))
-       :on-mouse-leave (fn [e]
-                         (block-mouse-leave e *control-show? block-id doc-mode?))}
-      (when (and (not slide?) (not in-whiteboard?) (not table?))
-        (let [edit? (or editing?
-                        (= uuid (:block/uuid (state/get-edit-block))))]
-          (block-control config block
-                         {:uuid uuid
-                          :block-id block-id
-                          :collapsed? collapsed?
-                          :*control-show? *control-show?
-                          :edit? edit?})))
+      [:div.block-main-container.flex.flex-row.pr-2.gap-1
+       {:data-has-heading (some-> block :block/properties (pu/lookup :logseq.property/heading))
+        :on-touch-start (fn [event uuid] (block-handler/on-touch-start event uuid))
+        :on-touch-move (fn [event]
+                         (block-handler/on-touch-move event block uuid editing? *show-left-menu? *show-right-menu?))
+        :on-touch-end (fn [event]
+                        (block-handler/on-touch-end event block uuid *show-left-menu? *show-right-menu?))
+        :on-touch-cancel (fn [_e]
+                           (block-handler/on-touch-cancel *show-left-menu? *show-right-menu?))
+        :on-mouse-enter (fn [e]
+                          (block-mouse-over e *control-show? block-id doc-mode?))
+        :on-mouse-leave (fn [e]
+                          (block-mouse-leave e *control-show? block-id doc-mode?))}
+       (when (and (not slide?) (not in-whiteboard?) (not table?))
+         (let [edit? (or editing?
+                       (= uuid (:block/uuid (state/get-edit-block))))]
+           (block-control config block
+             {:uuid uuid
+              :block-id block-id
+              :collapsed? collapsed?
+              :*control-show? *control-show?
+              :edit? edit?})))
 
-      (when (and @*show-left-menu? (not in-whiteboard?) (not table?))
-        (block-left-menu config block))
+       (when (and @*show-left-menu? (not in-whiteboard?) (not table?))
+         (block-left-menu config block))
 
-      (if whiteboard-block?
-        (block-reference {} (str uuid) nil)
-        ;; Not embed self
-        [:div.flex.flex-col.w-full
-         (let [block (merge block (block/parse-title-and-body uuid (:block/format block) pre-block? title))
-               hide-block-refs-count? (or (and (:embed? config)
-                                               (= (:block/uuid block) (:embed-id config)))
-                                          table?)]
-           (block-content-or-editor config block
-                                    {:edit-input-id edit-input-id
-                                     :block-id block-id
-                                     :edit? editing?
-                                     :hide-block-refs-count? hide-block-refs-count?}))])
+       (if whiteboard-block?
+         (block-reference {} (str uuid) nil)
+         ;; Not embed self
+         [:div.flex.flex-col.w-full
+          (let [block (merge block (block/parse-title-and-body uuid (:block/format block) pre-block? title))
+                hide-block-refs-count? (or (and (:embed? config)
+                                             (= (:block/uuid block) (:embed-id config)))
+                                         table?)]
+            (block-content-or-editor config block
+              {:edit-input-id edit-input-id
+               :block-id block-id
+               :edit? editing?
+               :hide-block-refs-count? hide-block-refs-count?}))])
 
-      (when (and @*show-right-menu? (not in-whiteboard?) (not table?))
-        (block-right-menu config block editing?))]
+       (when (and @*show-right-menu? (not in-whiteboard?) (not table?))
+         (block-right-menu config block editing?))]
 
-     (when (and db-based? (not table?))
-       (block-positioned-properties config block :block-below))
+      (when (and db-based? (not table?))
+        (block-positioned-properties config block :block-below))
 
-     (when (and db-based? (not collapsed?) (not table?))
-       [:div {:style {:padding-left 45}}
-        (db-properties-cp config block edit-input-id {:in-block-container? true})])
+      (when (and db-based? (not collapsed?) (not table?))
+        [:div {:style {:padding-left 45}}
+         (db-properties-cp config block edit-input-id {:in-block-container? true})])
 
-     (when-not (or (:hide-children? config) in-whiteboard? table?)
-       (let [config' (-> (update config :level inc)
-                         (dissoc :original-block :data :first-journal?))]
-         (block-children config' block children collapsed?)))
+      (when-not (or (:hide-children? config) in-whiteboard? table?)
+        (let [config' (-> (update config :level inc)
+                        (dissoc :original-block :data :first-journal?))]
+          (block-children config' block children collapsed?)))
 
-     (when-not (or in-whiteboard? table?) (dnd-separator-wrapper block children block-id slide? false false))]))
+      (when-not (or in-whiteboard? table?) (dnd-separator-wrapper block children block-id slide? false false))]]))
 
 (defn- block-changed?
   [old-block new-block]
