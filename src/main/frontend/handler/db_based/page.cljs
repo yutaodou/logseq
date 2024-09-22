@@ -82,6 +82,6 @@
                 add-tag-to-nearest-node? (= page-ref/right-brackets (common-util/safe-subs edit-content (- hash-idx 2) hash-idx))
                 nearest-node (some-> (editor-handler/get-nearest-page) string/trim)]
             (if (and add-tag-to-nearest-node? (not (string/blank? nearest-node)))
-              (when-let [e (db/get-case-page nearest-node)]
+              (when-let [e (db/get-page nearest-node)]
                 (add-tag (state/get-current-repo) (:block/uuid e) tag-entity))
               (add-tag (state/get-current-repo) (:block/uuid edit-block) tag-entity))))))))

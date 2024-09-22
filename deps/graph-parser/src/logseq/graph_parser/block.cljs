@@ -307,9 +307,7 @@
                         (not (boolean (text/get-nested-page-name original-page-name')))
                         (text/namespace-page? original-page-name'))
         page-entity (when (and db (not skip-existing-page-check?))
-                      (if class?
-                        (ldb/get-case-page db original-page-name')
-                        (ldb/get-page db original-page-name')))
+                      (ldb/get-page db original-page-name'))
         original-page-name' (or from-page (:block/title page-entity) original-page-name')
         page (merge
               {:block/name page-name
@@ -449,7 +447,7 @@
           refs (->> (ref->map-fn *refs false)
                     (remove nil?)
                     (map (fn [ref]
-                           (let [ref' (if-let [entity (ldb/get-case-page db (:block/title ref))]
+                           (let [ref' (if-let [entity (ldb/get-page db (:block/title ref))]
                               (if (= (:db/id parse-block) (:db/id entity))
                                 ref
                                 (select-keys entity [:block/uuid :block/title :block/name]))

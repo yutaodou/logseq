@@ -455,11 +455,6 @@ independent of format as format specific heading characters are stripped"
   (when page-name-or-uuid
     (ldb/get-page (conn/get-db) page-name-or-uuid)))
 
-(defn get-case-page
-  [page-name-or-uuid]
-  (when page-name-or-uuid
-    (ldb/get-case-page (conn/get-db) page-name-or-uuid)))
-
 (defn get-journal-page
   [page-title]
   (when-let [journal-day (date/journal-title->int page-title)]

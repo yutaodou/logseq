@@ -86,35 +86,42 @@
                    today-journal?
                    "journal"
                    :else
-                   "page")]
-    (when-not (ldb/page-exists? db title type)
-      (let [format    :markdown
-            page      (-> (gp-block/page-name->map title @conn true date-formatter
-                                                   {:class? class?
-                                                    :page-uuid (when (uuid? uuid) uuid)
-                                                    :skip-existing-page-check? true})
-                          (assoc :block/format format))
-            [page parents] (if (and (text/namespace-page? title) split-namespace?)
-                             (let [pages (outliner-core/split-namespace-pages db page nil date-formatter)]
-                               [(last pages) (butlast pages)])
-                             [page nil])]
-        (when page
-          (let [page-uuid (:block/uuid page)
-                page-txs  (build-page-tx conn properties page (select-keys options [:whiteboard? :class? :tags]))
-                first-block-tx (when (and
-                                      (nil? (d/entity @conn [:block/uuid page-uuid]))
-                                      create-first-block?
-                                      (not (or whiteboard? class?))
-                                      page-txs)
-                                 (build-first-block-tx (:block/uuid (first page-txs)) format))
-                txs      (concat
-                          parents
-                          page-txs
-                          first-block-tx)]
-            (when (seq txs)
-              (ldb/transact! conn txs (cond-> {:persist-op? persist-op?
-                                               :outliner-op :create-page}
-                                        today-journal?
-                                        (assoc :create-today-journal? true
-                                               :today-journal-name title))))
-            [title page-uuid]))))))
+                   "page")
+        page-exists? (ldb/page-exists? db title type)]
+    (when-not page-exists?
+      (let [page-with-same-name (ldb/get-page db title)]
+        (if (and class? (= (:block/type page-with-same-name) "page")) ; convert existing page to tag
+          (let [class (db-class/build-new-class db (select-keys page-with-same-name
+                                                                [:db/id :block/title :block/created-at]))]
+            (ldb/transact! conn [class] {:outliner-op :save-block})
+            [title (:block/uuid page-with-same-name)])
+          (let [format    :markdown
+                page      (-> (gp-block/page-name->map title @conn true date-formatter
+                                                       {:class? class?
+                                                        :page-uuid (when (uuid? uuid) uuid)
+                                                        :skip-existing-page-check? true})
+                              (assoc :block/format format))
+                [page parents] (if (and (text/namespace-page? title) split-namespace?)
+                                 (let [pages (outliner-core/split-namespace-pages db page nil date-formatter)]
+                                   [(last pages) (butlast pages)])
+                                 [page nil])]
+            (when page
+              (let [page-uuid (:block/uuid page)
+                    page-txs  (build-page-tx conn properties page (select-keys options [:whiteboard? :class? :tags]))
+                    first-block-tx (when (and
+                                          (nil? (d/entity @conn [:block/uuid page-uuid]))
+                                          create-first-block?
+                                          (not (or whiteboard? class?))
+                                          page-txs)
+                                     (build-first-block-tx (:block/uuid (first page-txs)) format))
+                    txs      (concat
+                              parents
+                              page-txs
+                              first-block-tx)]
+                (when (seq txs)
+                  (ldb/transact! conn txs (cond-> {:persist-op? persist-op?
+                                                   :outliner-op :create-page}
+                                            today-journal?
+                                            (assoc :create-today-journal? true
+                                                   :today-journal-name title))))
+                [title page-uuid]))))))))

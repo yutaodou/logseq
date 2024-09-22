@@ -184,8 +184,8 @@
             fix-data (keep
                       (fn [d]
                         (if-let [id (if (= :all-pages (:v d))
-                                   (:db/id (ldb/get-case-page db common-config/views-page-name))
-                                   (:db/id (d/entity db (:v d))))]
+                                      (:db/id (ldb/get-page db common-config/views-page-name))
+                                      (:db/id (d/entity db (:v d))))]
                           [:db/add (:e d) :logseq.property/view-for id]
                           [:db/retract (:e d) :logseq.property/view-for (:v d)]))
                       datoms)]
