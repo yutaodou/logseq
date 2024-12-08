@@ -65,3 +65,5 @@ The deps.edn dependencies are used by both ClojureScript and nbb-logseq. Their
 versions should be backwards compatible with each other with priority given to
 the frontend. _No new dependency_ should be introduced to this library without
 an understanding of the tradeoffs of adding this to nbb-logseq.
+
+
