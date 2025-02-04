@@ -4,13 +4,12 @@
             [cljs-time.core :as t]
             [clojure.string :as string]
             [dommy.core :as d]
-            [frontend.common.missionary-util :as c.m]
+            [frontend.common.missionary :as c.m]
             [frontend.components.export :as export]
             [frontend.components.file-sync :as fs-sync]
             [frontend.components.page-menu :as page-menu]
             [frontend.components.plugins :as plugins]
             [frontend.components.right-sidebar :as sidebar]
-            [frontend.components.rtc.flows :as rtc-flows]
             [frontend.components.rtc.indicator :as rtc-indicator]
             [frontend.components.server :as server]
             [frontend.components.settings :as settings]
@@ -19,10 +18,12 @@
             [frontend.context.i18n :refer [t]]
             [frontend.db :as db]
             [frontend.handler :as handler]
+            [frontend.handler.db-based.rtc-flows :as rtc-flows]
             [frontend.handler.page :as page-handler]
             [frontend.handler.plugin :as plugin-handler]
             [frontend.handler.route :as route-handler]
             [frontend.handler.user :as user-handler]
+            [frontend.hooks :as hooks]
             [frontend.mobile.util :as mobile-util]
             [frontend.state :as state]
             [frontend.storage :as storage]
@@ -39,14 +40,12 @@
 (rum/defc home-button
   < {:key-fn #(identity "home-button")}
   []
-  (ui/with-shortcut :go/home "left"
-    [:button.button.icon.inline.mx-1
-     {:title (t :home)
-      :on-click #(do
-                   (when (mobile-util/native-iphone?)
-                     (state/set-left-sidebar-open! false))
-                   (route-handler/redirect-to-home!))}
-     (ui/icon "home" {:size ui/icon-size})]))
+  (shui/button-ghost-icon :home
+                          {:title (t :home)
+                           :on-click #(do
+                                        (when (mobile-util/native-iphone?)
+                                          (state/set-left-sidebar-open! false))
+                                        (route-handler/redirect-to-home!))}))
 
 (rum/defcs rtc-collaborators <
   rum/reactive
@@ -68,16 +67,13 @@
         online-users @(::online-users state)]
     (when rtc-graph-id
       [:div.rtc-collaborators.flex.gap-1.text-sm.py-2.bg-gray-01.items-center
-       (shui/button
-        {:variant :ghost
-         :size :sm
-         :class "px-2 opacity-50 hover:opacity-100"
-         :on-click #(shui/dialog-open!
-                     (fn []
-                       [:div.p-2.-mb-8
-                        [:h1.text-3xl.-mt-2.-ml-2 "Collaborators:"]
-                        (settings/settings-collaboration)]))}
-        (shui/tabler-icon "user-plus"))
+       (shui/button-ghost-icon :user-plus
+                               {:on-click #(shui/dialog-open!
+                                            (fn []
+                                              [:div.p-2.-mb-8
+                                               [:h1.text-3xl.-mt-2.-ml-2 "Collaborators:"]
+                                               (settings/settings-collaboration)]))})
+
        (when (seq online-users)
          (for [{user-email :user/email
                 user-name :user/name
@@ -190,56 +186,56 @@
                                :class "w-full"}})]
                  (concat page-menu-and-hr)
                  (remove nil?)))]
-    [:button#dots-menu.button.icon.toolbar-dots-btn
-     {:title (t :header/more)
-      :on-pointer-down (fn [^js e]
-                         (shui/popup-show! (.-target e)
-                                           (fn [{:keys [id]}]
-                                             (for [{:keys [hr item title options icon]} (items)]
-                                               (let [on-click' (:on-click options)
-                                                     href (:href options)]
-                                                 (if hr
-                                                   (shui/dropdown-menu-separator)
-                                                   (shui/dropdown-menu-item
-                                                    (assoc options
-                                                           :on-click (fn [^js e]
-                                                                       (when on-click'
-                                                                         (when-not (false? (on-click' e))
-                                                                           (shui/popup-hide! id)))))
-                                                    (or item
-                                                        (if href
-                                                          [:a.flex.items-center.w-full
-                                                           {:href href :on-click #(shui/popup-hide! id)
-                                                            :style {:color "inherit"}}
-                                                           [:span.flex.items-center.gap-1.w-full
-                                                            icon [:div title]]]
-                                                          [:span.flex.items-center.gap-1.w-full
-                                                           icon [:div title]])))))))
-                                           {:align "end"
-                                            :as-dropdown? true
-                                            :content-props {:class "w-64"
-                                                            :align-offset -32}}))}
-     (ui/icon "dots" {:size ui/icon-size})]))
+
+    (shui/button-ghost-icon :dots
+                            {:title (t :header/more)
+                             :class "toolbar-dots-btn"
+                             :on-pointer-down (fn [^js e]
+                                                (shui/popup-show! (.-target e)
+                                                                  (fn [{:keys [id]}]
+                                                                    (for [{:keys [hr item title options icon]} (items)]
+                                                                      (let [on-click' (:on-click options)
+                                                                            href (:href options)]
+                                                                        (if hr
+                                                                          (shui/dropdown-menu-separator)
+                                                                          (shui/dropdown-menu-item
+                                                                           (assoc options
+                                                                                  :on-click (fn [^js e]
+                                                                                              (when on-click'
+                                                                                                (when-not (false? (on-click' e))
+                                                                                                  (shui/popup-hide! id)))))
+                                                                           (or item
+                                                                               (if href
+                                                                                 [:a.flex.items-center.w-full
+                                                                                  {:href href :on-click #(shui/popup-hide! id)
+                                                                                   :style {:color "inherit"}}
+                                                                                  [:span.flex.items-center.gap-1.w-full
+                                                                                   icon [:div title]]]
+                                                                                 [:span.flex.items-center.gap-1.w-full
+                                                                                  icon [:div title]])))))))
+                                                                  {:align "end"
+                                                                   :as-dropdown? true
+                                                                   :content-props {:class "w-64"
+                                                                                   :align-offset -32}}))})))
 
 (rum/defc back-and-forward
   < {:key-fn #(identity "nav-history-buttons")}
   []
   [:div.flex.flex-row
-
    (ui/with-shortcut :go/backward "bottom"
-     [:button.it.navigation.nav-left.button.icon
-      {:title (t :header/go-back) :on-click #(js/window.history.back)}
-      (ui/icon "arrow-left" {:size ui/icon-size})])
+     (shui/button-ghost-icon :arrow-left
+                             {:title (t :header/go-back) :on-click #(js/window.history.back)
+                              :class "it navigation nav-left"}))
 
    (ui/with-shortcut :go/forward "bottom"
-     [:button.it.navigation.nav-right.button.icon
-      {:title (t :header/go-forward) :on-click #(js/window.history.forward)}
-      (ui/icon "arrow-right" {:size ui/icon-size})])])
+     (shui/button-ghost-icon :arrow-right
+                             {:title (t :header/go-forward) :on-click #(js/window.history.forward)
+                              :class "it navigation nav-right"}))])
 
 (rum/defc updater-tips-new-version
   [t]
   (let [[downloaded, set-downloaded] (rum/use-state nil)
-        _ (rum/use-effect!
+        _ (hooks/use-effect!
            (fn []
              (when-let [channel (and (util/electron?) "auto-updater-downloaded")]
                (let [callback (fn [_ args]
@@ -270,12 +266,12 @@
   []
   (let [[recent-days set-recent-days!] (rum/use-state (state/get-highlight-recent-days))
         [thumb-ref set-thumb-ref!] (rum/use-state nil)]
-    (rum/use-effect!
+    (hooks/use-effect!
      (fn []
        (when thumb-ref
          (.focus ^js thumb-ref)))
      [thumb-ref])
-    (rum/use-effect!
+    (hooks/use-effect!
      (fn []
        (let [all-nodes (d/by-class "ls-block")
              recent-node (fn [node]

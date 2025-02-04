@@ -4,15 +4,16 @@
             [clojure.set :as set]
             [clojure.string :as string]
             [datascript.core :as d]
-            [frontend.common.schema-register :as sr]
             [frontend.worker.handler.page :as worker-page]
             [frontend.worker.rtc.asset :as r.asset]
             [frontend.worker.rtc.client-op :as client-op]
             [frontend.worker.rtc.const :as rtc-const]
             [frontend.worker.rtc.log-and-state :as rtc-log-and-state]
+            [frontend.worker.rtc.malli-schema :as rtc-schema]
             [frontend.worker.state :as worker-state]
             [frontend.worker.util :as worker-util]
             [logseq.clj-fractional-indexing :as index]
+            [logseq.common.defkeywords :refer [defkeywords]]
             [logseq.common.util :as common-util]
             [logseq.db :as ldb]
             [logseq.db.frontend.property :as db-property]
@@ -22,9 +23,10 @@
             [logseq.outliner.core :as outliner-core]
             [logseq.outliner.transaction :as outliner-tx]))
 
-(sr/defkeyword ::need-pull-remote-data
-  "remote-update's :remote-t-before > :local-tx,
-   so need to pull earlier remote-data from websocket.")
+(defkeywords
+  ::need-pull-remote-data {:doc "
+remote-update's :remote-t-before > :local-tx,
+so need to pull earlier remote-data from websocket."})
 
 (defmulti ^:private transact-db! (fn [action & _args] action))
 
@@ -189,8 +191,7 @@
               (transact-db! :move-blocks repo conn [b] local-parent false)
               (transact-db! :insert-blocks repo conn
                             [{:block/uuid block-uuid
-                              :block/title ""
-                              :block/format :markdown}]
+                              :block/title ""}]
                             local-parent {:sibling? false :keep-uuid? true}))
             (transact-db! :update-block-order-directly repo conn block-uuid first-remote-parent remote-block-order))
 
@@ -236,28 +237,41 @@
      (= :db.cardinality/many (:db/cardinality k-schema))]))
 
 (defn- patch-remote-attr-map-by-local-av-coll
-  [attr-map av-coll]
+  [remote-attr-map local-av-coll]
   (let [a->add->v-set
         (reduce
          (fn [m [a v _t add?]]
            (let [{add-vset true retract-vset false} (get m a {true #{} false #{}})]
              (assoc m a {true ((if add? conj disj) add-vset v)
                          false ((if add? disj conj) retract-vset v)})))
-         {} av-coll)]
-    (into attr-map
-          (keep
-           (fn [[remote-a remote-v]]
-             (when-let [{add-vset true retract-vset false} (get a->add->v-set remote-a)]
-               [remote-a
-                (if (coll? remote-v)
-                  (-> (set remote-v)
-                      (set/union add-vset)
-                      (set/difference retract-vset)
-                      vec)
-                  (cond
-                    (seq add-vset) (first add-vset)
-                    (contains? retract-vset remote-v) nil))])))
-          attr-map)))
+         {} local-av-coll)
+        updated-remote-attr-map1
+        (keep
+         (fn [[remote-a remote-v]]
+           (when-let [{add-vset true retract-vset false} (get a->add->v-set remote-a)]
+             [remote-a
+              (if (coll? remote-v)
+                (-> (set remote-v)
+                    (set/union add-vset)
+                    (set/difference retract-vset)
+                    vec)
+                (cond
+                  (seq add-vset) (first add-vset)
+                  (contains? retract-vset remote-v) nil))]))
+         remote-attr-map)
+        updated-remote-attr-map2
+        (keep
+         (fn [[a add->v-set]]
+           (when-let [ns (namespace a)]
+             (when (and (not (contains? #{"block"} ns))
+                        ;; FIXME: only handle non-block/xxx attrs,
+                        ;; because some :block/xxx attrs are card-one, we only generate card-many values here
+                        (not (contains? remote-attr-map a)))
+               (when-let [v-set (not-empty (get add->v-set true))]
+                 [a (vec v-set)]))))
+         a->add->v-set)]
+    (into remote-attr-map
+          (concat updated-remote-attr-map1 updated-remote-attr-map2))))
 
 (defn- update-remote-data-by-local-unpushed-ops
   "when remote-data request client to move/update/remove/... blocks,
@@ -289,6 +303,13 @@
                                 remote-op)]
                (assoc affected-blocks-map block-uuid remote-op*))
              affected-blocks-map))
+         :remove
+         ;; TODO: if this block's updated by others, we shouldn't remove it
+         ;; but now, we don't know who updated this block recv from remote
+         ;; once we have this attr(:block/updated-by, :block/created-by), we can finish this TODO
+         (let [block-uuid (:block-uuid local-op-value)]
+           (dissoc affected-blocks-map block-uuid))
+
          ;;else
          affected-blocks-map)))
    affected-blocks-map local-unpushed-ops))
@@ -346,16 +367,14 @@
     :block/updated-at
     :block/created-at
     :block/alias
-    :block/type
-    :block/schema
     :block/tags
     :block/link
     :block/journal-day
-    :property/schema.classes
-    :property.value/content})
+    :logseq.property/classes
+    :logseq.property/value})
 
 (def ^:private watched-attr-ns
-  (conj db-property/logseq-property-namespaces "logseq.class" "logseq.kv"))
+  (conj db-property/logseq-property-namespaces "logseq.class"))
 
 (defn- update-op-watched-attr?
   [attr]
@@ -539,7 +558,7 @@
   "Apply remote-update(`remote-update-event`)"
   [graph-uuid repo conn date-formatter remote-update-event add-log-fn]
   (let [remote-update-data (:value remote-update-event)]
-    (assert (rtc-const/data-from-ws-validator remote-update-data) remote-update-data)
+    (assert (rtc-schema/data-from-ws-validator remote-update-data) remote-update-data)
     (let [remote-t (:t remote-update-data)
           remote-t-before (:t-before remote-update-data)
           local-tx (client-op/get-local-tx repo)]
@@ -574,7 +593,7 @@
           (batch-tx/with-batch-tx-mode conn {:rtc-tx? true
                                              :persist-op? false
                                              :gen-undo-ops? false
-                                             :skip-store-conn rtc-const/RTC-E2E-TEST}
+                                             :frontend.worker.pipeline/skip-store-conn rtc-const/RTC-E2E-TEST}
             (worker-util/profile :ensure-refed-blocks-exist (ensure-refed-blocks-exist repo conn refed-blocks))
             (worker-util/profile :apply-remote-update-page-ops (apply-remote-update-page-ops repo conn update-page-ops))
             (worker-util/profile :apply-remote-move-ops (apply-remote-move-ops repo conn sorted-move-ops))

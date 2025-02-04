@@ -1,12 +1,13 @@
 (ns logseq.outliner.pipeline
   "Core fns for use with frontend worker and node"
-  (:require [datascript.core :as d]
+  (:require [clojure.set :as set]
+            [datascript.core :as d]
             [datascript.impl.entity :as de]
-            [clojure.set :as set]
+            [logseq.common.util.date-time :as date-time-util]
             [logseq.db :as ldb]
             [logseq.db.frontend.content :as db-content]
-            [logseq.db.frontend.property :as db-property]
             [logseq.db.frontend.entity-plus :as entity-plus]
+            [logseq.db.frontend.property :as db-property]
             [logseq.outliner.datascript-report :as ds-report]))
 
 (defn filter-deleted-blocks
@@ -24,7 +25,7 @@
                             (keep (fn [id]
                                     (when-let [entity (d/entity db-after [:block/uuid id])]
                                       (let [from-property (:logseq.property/created-from-property entity)
-                                            default? (= :default (get-in from-property [:block/schema :type]))
+                                            default? (= :default (:logseq.property/type from-property))
                                             page? (ldb/page? entity)]
                                         (when-not (or page? (and from-property (not default?)))
                                           [(:db/id entity)
@@ -67,7 +68,7 @@
   (let [*computed-ids (atom #{})
         blocks (remove (fn [block]
                          (let [from-property (:logseq.property/created-from-property block)
-                               default? (= :default (get-in from-property [:block/schema :type]))]
+                               default? (= :default (:logseq.property/type from-property))]
                            (and from-property (not default?))))
                        blocks*)]
     (->>
@@ -142,6 +143,12 @@
                   (when-let [e (d/entity db [:block/uuid id])]
                     (:db/id e))))))))
 
+(defn ^:api get-journal-day-from-long
+  [db v]
+  (when v
+    (let [day (date-time-util/ms->journal-day v)]
+      (:e (first (d/datoms db :avet :block/journal-day day))))))
+
 (defn db-rebuild-block-refs
   "Rebuild block refs for DB graphs"
   [db block]
@@ -152,7 +159,8 @@
                     (->> (entity-plus/lookup-kv-then-entity (d/entity db (:db/id block)) :block/properties)
                          (into {}))
                     ;; both page and parent shouldn't be counted as refs
-                    (dissoc :block/parent :block/page))
+                    (dissoc :block/parent :block/page
+                            :logseq.property.history/block :logseq.property.history/property :logseq.property.history/ref-value))
         property-key-refs (->> (keys properties)
                                (remove private-built-in-props))
         page-or-object? (fn [block]
@@ -163,8 +171,8 @@
                                ;; parent block as they are dependent on their block for display
                                ;; and look weirdly recursive - https://github.com/logseq/db-test/issues/36
                                (not (:logseq.property/created-from-property block))))
-        property-value-refs (->> (vals properties)
-                                 (mapcat (fn [v]
+        property-value-refs (->> properties
+                                 (mapcat (fn [[property v]]
                                            (cond
                                              (page-or-object? v)
                                              [(:db/id v)]
@@ -173,7 +181,18 @@
                                              (map :db/id v)
 
                                              :else
-                                             nil))))
+                                             (let [datetime? (= :datetime (:logseq.property/type (d/entity db property)))]
+                                               (cond
+                                                 (and datetime? (coll? v))
+                                                 (keep #(get-journal-day-from-long db %) v)
+
+                                                 datetime?
+                                                 (when-let [journal-day (get-journal-day-from-long db v)]
+                                                   [journal-day])
+
+                                                 :else
+                                                 nil))))))
+
         property-refs (concat property-key-refs property-value-refs)
         content-refs (block-content-refs db block)]
     (->> (concat (map ref->eid (:block/tags block))
@@ -202,7 +221,8 @@
   [conn tx-report]
   (let [{:keys [blocks]} (ds-report/get-blocks-and-pages tx-report)
         refs-tx-report (when-let [refs-tx (and (seq blocks) (rebuild-block-refs-tx tx-report blocks))]
-                         (ldb/transact! conn refs-tx {:pipeline-replace? true}))
+                         (ldb/transact! conn refs-tx {:pipeline-replace? true
+                                                      ::original-tx-meta (:tx-meta tx-report)}))
         blocks' (if refs-tx-report
                   (keep (fn [b] (d/entity (:db-after refs-tx-report) (:db/id b))) blocks)
                   blocks)

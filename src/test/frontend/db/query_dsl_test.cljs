@@ -1,11 +1,11 @@
 (ns frontend.db.query-dsl-test
   (:require [cljs.test :refer [are deftest testing use-fixtures is]]
-            [clojure.string :as str]
-            [logseq.common.util.page-ref :as page-ref]
+            [clojure.string :as string]
             [frontend.db :as db]
-            [frontend.util :as util]
             [frontend.db.query-dsl :as query-dsl]
-            [frontend.test.helper :as test-helper :include-macros true :refer [load-test-files load-test-files-for-db-graph]]))
+            [frontend.test.helper :as test-helper :include-macros true :refer [load-test-files load-test-files-for-db-graph]]
+            [frontend.util :as util]
+            [logseq.common.util.page-ref :as page-ref]))
 
 ;; TODO: quickcheck
 ;; 1. generate query filters
@@ -58,7 +58,7 @@
   [query]
   (if js/process.env.DB_GRAPH
     (some-> query
-            (str/replace "(page-tags" "(tags"))
+            (string/replace "(page-tags" "(tags"))
     query))
 
 (defn- dsl-query
@@ -105,7 +105,7 @@
   [{:block/keys [title]}]
   (some->> title
            (re-find #"[^\[]+")
-           str/trim))
+           string/trim))
 
 (defn- block-property-queries-test
   []
@@ -126,51 +126,51 @@ prop-d:: [[nada]]"}])
 
   (testing "Blocks have given property value"
     (is (= #{"b1" "b2"}
-           (set (map (comp first str/split-lines :block/title)
+           (set (map (comp first string/split-lines :block/title)
                      (dsl-query "(property prop-a val-a)")))))
 
     (is (= ["b2"]
-           (map (comp first str/split-lines :block/title)
+           (map (comp first string/split-lines :block/title)
                 (dsl-query "(property prop-b val-b)")))))
 
   (is (= ["b2"]
-         (map (comp first str/split-lines :block/title)
+         (map (comp first string/split-lines :block/title)
               (dsl-query "(and (property prop-b val-b))")))
       "Blocks have property value with empty AND")
 
   (is (= ["b3"]
-         (map (comp first str/split-lines :block/title)
+         (map (comp first string/split-lines :block/title)
               (dsl-query "(and (property prop-c \"page c\"))")))
       "Blocks have property value from a set of values")
 
   (is (= ["b3"]
-         (map (comp first str/split-lines :block/title)
+         (map (comp first string/split-lines :block/title)
               (dsl-query "(and (property prop-c \"page c\") (property prop-c \"page b\"))")))
       "Blocks have ANDed property values")
 
   (is (= #{"b2" "b3"}
          (set
-          (map (comp first str/split-lines :block/title)
+          (map (comp first string/split-lines :block/title)
                (dsl-query "(or (property prop-c \"page c\") (property prop-b val-b))"))))
       "Blocks have ORed property values")
 
   (is (= ["b1"]
-         (map (comp first str/split-lines :block/title)
+         (map (comp first string/split-lines :block/title)
               (dsl-query "(property prop-num 2000)")))
       "Blocks have integer property value")
 
   (is (= ["b3"]
-         (map (comp first str/split-lines :block/title)
+         (map (comp first string/split-lines :block/title)
               (dsl-query "(property prop-linked-num 3000)")))
       "Blocks have property with integer page value")
 
   (is (= ["b3"]
-         (map (comp first str/split-lines :block/title)
+         (map (comp first string/split-lines :block/title)
               (dsl-query "(property prop-d no-space-link)")))
       "Blocks have property value with no space")
 
   (is (= #{"b3" "b4"}
-         (set (map (comp first str/split-lines :block/title)
+         (set (map (comp first string/split-lines :block/title)
                    (dsl-query "(property prop-d)"))))
       "Blocks that have a property"))
 
@@ -183,7 +183,7 @@ prop-d:: [[nada]]"}])
   (deftest db-only-block-property-queries
     (load-test-files-for-db-graph
      {:properties
-      {:zzz {:block/schema {:type :default}
+      {:zzz {:logseq.property/type :default
              :block/title "zzz name!"}}
       :pages-and-blocks
       [{:page {:block/title "page1"}
@@ -208,11 +208,11 @@ prop-d:: [[nada]]"}])
   (deftest property-default-type-default-value-queries
     (load-test-files-for-db-graph
      {:properties
-      {:default {:block/schema {:type :default}
+      {:default {:logseq.property/type :default
                  :build/properties
                  {:logseq.property/default-value "foo"}
                  :build/properties-ref-types {:entity :number}}}
-      :classes {:Class1 {:build/schema-properties [:default]}}
+      :classes {:Class1 {:build/class-properties [:default]}}
       :pages-and-blocks
       [{:page {:block/title "page1"}
         :blocks [{:block/title "b1"
@@ -222,8 +222,8 @@ prop-d:: [[nada]]"}])
                  {:block/title "b3"
                   :build/tags [:Class1]}]}]})
 
-    (is (= ["b3" "b2" "b1"]
-           (map :block/title (dsl-query "(property :user.property/default)")))
+    (is (= (set ["b3" "b2" "b1"])
+           (set (map :block/title (dsl-query "(property :user.property/default)"))))
         "Blocks with any :default property or tagged with a tag that has that default-value property")
     (is (= ["b1" "b3"]
            (map :block/title (dsl-query "(property :user.property/default \"foo\")")))
@@ -235,10 +235,10 @@ prop-d:: [[nada]]"}])
   (deftest property-checkbox-type-default-value-queries
     (load-test-files-for-db-graph
      {:properties
-      {:checkbox {:block/schema {:type :checkbox}
+      {:checkbox {:logseq.property/type :checkbox
                   :build/properties
                   {:logseq.property/scalar-default-value true}}}
-      :classes {:Class1 {:build/schema-properties [:checkbox]}}
+      :classes {:Class1 {:build/class-properties [:checkbox]}}
       :pages-and-blocks
       [{:page {:block/title "page1"}
         :blocks [{:block/title "b1"
@@ -248,15 +248,47 @@ prop-d:: [[nada]]"}])
                  {:block/title "b3"
                   :build/tags [:Class1]}]}]})
 
-    (is (= ["b3" "b2" "b1"]
-           (map :block/title (dsl-query "(property :user.property/checkbox)")))
+    (is (= (set ["b3" "b2" "b1"])
+           (set (map :block/title (dsl-query "(property :user.property/checkbox)"))))
         "Blocks with any :checkbox property or tagged with a tag that has that default-value property")
     (is (= ["b1" "b3"]
            (map :block/title (dsl-query "(property :user.property/checkbox true)")))
         "Blocks with :checkbox property value or tagged with a tag that has that default-value property value")
     (is (= ["b2"]
            (map :block/title (dsl-query "(property :user.property/checkbox false)")))
-        "Blocks with :checkbox property value and not tagged with a tag that has that default-value property value")))
+        "Blocks with :checkbox property value and not tagged with a tag that has that default-value property value"))
+
+  (deftest closed-property-default-value-queries
+    (load-test-files-for-db-graph
+     {:properties
+      {:status {:logseq.property/type :default
+                :build/closed-values
+                [{:value "Todo" :uuid (random-uuid)}
+                 {:value "Doing" :uuid (random-uuid)}]
+                :build/properties
+                {:logseq.property/default-value "Todo"}
+                :build/properties-ref-types {:entity :number}}}
+      :classes {:Mytask {:build/class-properties [:status]}
+                :Bug {:build/class-parent :Mytask}}
+      :pages-and-blocks
+      [{:page {:block/title "page1"}
+        :blocks [{:block/title "task1"
+                  :build/properties {:status "Doing"}
+                  :build/tags [:Mytask]}
+                 {:block/title "task2"
+                  :build/tags [:Mytask]}
+                 {:block/title "bug1"
+                  :build/properties {:status "Doing"}
+                  :build/tags [:Bug]}
+                 {:block/title "bug2"
+                  :build/tags [:Bug]}]}]})
+
+    (is (= ["task2" "bug2"]
+           (map :block/title (dsl-query "(property status \"Todo\")")))
+        "Blocks or tagged with or descended from a tag that has closed default-value property")
+    (is (= ["task1" "bug1"]
+           (map :block/title (dsl-query "(property status \"Doing\")")))
+        "Blocks or tagged with or descended from a tag that don't have closed default-value property value")))
 
 (deftest block-property-query-performance
   (let [pages (->> (repeat 10 {:tags ["tag1" "tag2"]})
@@ -264,7 +296,7 @@ prop-d:: [[nada]]"}])
                                   {:file/path (str "pages/page" idx ".md")
                                    :file/content (if (seq tags)
                                                    (str "page-prop:: b\n- block for page" idx
-                                                        "\ntagz:: " (str/join ", " (map page-ref/->page-ref tags)))
+                                                        "\ntagz:: " (string/join ", " (map page-ref/->page-ref tags)))
                                                    "")})))
         _ (load-test-files pages)
         {:keys [result time]}
@@ -739,7 +771,7 @@ created-at:: 1608968448116
   (require '[clojure.pprint :as pprint])
   (test-helper/start-test-db!)
 
-  (query-dsl/query test-db "(task done)")
+  (query-dsl/query test-helper/test-db "(task done)")
 
  ;; Useful for debugging
   (prn
@@ -747,7 +779,7 @@ created-at:: 1608968448116
     '[:find (pull ?b [*])
       :where
       [?b :block/name]]
-    (frontend.db/get-db test-db)))
+    (frontend.db/get-db test-helper/test-db)))
 
  ;; (or (priority a) (not (priority a)))
  ;; FIXME: Error: Insufficient bindings: #{?priority} not bound in [(contains? #{"A"} ?priority)]
@@ -759,7 +791,7 @@ created-at:: 1608968448116
       (or (and [?b :block/priority ?priority] [(contains? #{"A"} ?priority)])
           (not [?b :block/priority #{"A"}]
                [(contains? #{"A"} ?priority)]))]
-    (frontend.db/get-db test-db))))
+    (frontend.db/get-db test-helper/test-db))))
 
 (when-not js/process.env.DB_GRAPH
   (deftest namespace-queries

@@ -1,16 +1,16 @@
 (ns frontend.worker.search
   "Full-text and fuzzy search"
-  (:require [clojure.string :as string]
+  (:require ["fuse.js" :as fuse]
             [cljs-bean.core :as bean]
-            ["fuse.js" :as fuse]
-            [goog.object :as gobj]
+            [clojure.set :as set]
+            [clojure.string :as string]
             [datascript.core :as d]
             [frontend.common.search-fuzzy :as fuzzy]
-            [logseq.db.sqlite.util :as sqlite-util]
+            [goog.object :as gobj]
             [logseq.common.util :as common-util]
-            [logseq.db :as ldb]
-            [clojure.set :as set]
             [logseq.common.util.namespace :as ns-util]
+            [logseq.db :as ldb]
+            [logseq.db.sqlite.util :as sqlite-util]
             [logseq.graph-parser.text :as text]))
 
 ;; TODO: use sqlite for fuzzy search
@@ -136,7 +136,7 @@ DROP TRIGGER IF EXISTS blocks_au;
                         (string/replace " | " " OR ")
                         (string/replace " not " " NOT "))]
     (cond
-      (re-find #"[^\w\s]" q)            ; punctuations
+      (and (re-find #"[^\w\s]" q) (not (some #(string/includes? match-input %) ["AND" "OR" "NOT"])))            ; punctuations
       (str "\"" match-input "\"*")
       (not= q match-input)
       (string/replace match-input "," "")
@@ -332,44 +332,6 @@ DROP TRIGGER IF EXISTS blocks_au;
   (drop-tables-and-triggers! db)
   (create-tables-and-triggers! db))
 
-(comment
-  (defn- property-value-when-closed
-    "Returns property value if the given entity is type 'closed value' or nil"
-    [ent]
-    (when (= (:block/type ent) "closed value")
-      (:block/title ent))))
-
-(comment
-  (defn- get-db-properties-str
-    "Similar to db-pu/readable-properties but with a focus on making property values searchable"
-    [db properties]
-    (->> properties
-         (keep
-          (fn [[k v]]
-            (let [property (d/entity db k)
-                  values
-                  (->> (if (set? v) v #{v})
-                       (map (fn [val]
-                              (if (= :db.type/ref (:db/valueType property))
-                                (let [e (d/entity db (:db/id val))
-                                      value (or
-                                           ;; closed value
-                                             (property-value-when-closed e)
-                                           ;; :page or :date properties
-                                             (:block/title e)
-                                             ;; first child
-                                             (let [parent-id (:db/id e)]
-                                               (:block/title (ldb/get-first-child db parent-id))))]
-                                  value)
-                                val)))
-                       (remove string/blank?))
-                  hide? (get-in property [:block/schema :hide?])]
-              (when (and (not hide?) (seq values))
-                (str (:block/title property)
-                     ": "
-                     (string/join "; " values))))))
-         (string/join ", "))))
-
 (defn get-all-block-contents
   [db]
   (when db
@@ -413,7 +375,7 @@ DROP TRIGGER IF EXISTS blocks_au;
         datoms (filter
                 (fn [datom]
                   ;; Capture any direct change on page display title, page ref or block content
-                  (contains? #{:block/uuid :block/name :block/title :block/properties :block/schema} (:a datom)))
+                  (contains? #{:block/uuid :block/name :block/title :block/properties} (:a datom)))
                 data)]
     (when (seq datoms)
       (get-blocks-from-datoms-impl repo tx-report datoms))))

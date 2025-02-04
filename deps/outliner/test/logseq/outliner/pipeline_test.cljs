@@ -1,21 +1,23 @@
 (ns logseq.outliner.pipeline-test
   (:require [cljs.test :refer [deftest is testing]]
-            [logseq.db.frontend.schema :as db-schema]
-            [datascript.core :as d]
-            [logseq.db.sqlite.create-graph :as sqlite-create-graph]
-            [logseq.db.sqlite.build :as sqlite-build]
-            [logseq.outliner.db-pipeline :as db-pipeline]
-            [logseq.outliner.pipeline :as outliner-pipeline]
+            [clojure.set :as set]
             [clojure.string :as string]
+            [datascript.core :as d]
+            [logseq.common.util.page-ref :as page-ref]
+            [logseq.db.frontend.schema :as db-schema]
+            [logseq.db.sqlite.build :as sqlite-build]
+            [logseq.db.sqlite.create-graph :as sqlite-create-graph]
             [logseq.db.test.helper :as db-test]
-            [logseq.common.util.page-ref :as page-ref]))
+            [logseq.outliner.db-pipeline :as db-pipeline]
+            [logseq.outliner.pipeline :as outliner-pipeline]))
 
 (defn- get-blocks [db]
   (->> (d/q '[:find (pull ?b [* {:block/path-refs [:block/name :db/id]}])
               :in $
-              :where [?b :block/title]
-              [(missing? $ ?b :logseq.property/built-in?)]
-              [(missing? $ ?b :block/type)]]
+              :where
+              [?b :block/page]
+              [?b :block/title]
+              [(missing? $ ?b :logseq.property/built-in?)]]
             db)
        (map first)))
 
@@ -48,13 +50,14 @@
           updated-blocks (->> (get-blocks @conn)
                               ;; Only keep enough of content to uniquely identify block
                               (map #(hash-map :block/title (re-find #"\w+" (:block/title %))
-                                              :path-ref-names (set (map :block/name (:block/path-refs %))))))]
+                                              :path-ref-names (set (map :block/name (:block/path-refs %))))))
+          page-tag-refs #{"page" "tags"}]
       (is (= [{:block/title "parent"
-               :path-ref-names #{"page1" "bar"}}
+               :path-ref-names (set/union page-tag-refs #{"page1" "bar"})}
               {:block/title "child"
-               :path-ref-names #{"page1" "bar" "baz"}}
+               :path-ref-names (set/union page-tag-refs #{"page1" "bar" "baz"})}
               {:block/title "grandchild"
-               :path-ref-names #{"page1" "bar" "baz" "bing"}}]
+               :path-ref-names (set/union page-tag-refs #{"page1" "bar" "baz" "bing"})}]
              updated-blocks)))))
 
 (deftest block-content-refs

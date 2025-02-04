@@ -1,12 +1,18 @@
-(ns frontend.common.missionary-util
+(ns frontend.common.missionary
   "Utils based on missionary. Used by frontend and worker namespaces"
-  (:require-macros [frontend.common.missionary-util])
+  (:require-macros [frontend.common.missionary])
   (:require [cljs.core.async.impl.channels]
             [clojure.core.async :as a]
             [missionary.core :as m]
-            [promesa.protocols :as pt])
-  ;; (:import [missionary Cancelled])
-  )
+            [promesa.protocols :as pt]))
+
+(defn continue-flow
+  "ensure f is a continuous flow"
+  ([f] (continue-flow nil f))
+  ([init-value f]
+   (->> f
+        (m/reductions {} init-value)
+        (m/latest identity))))
 
 (def delays (reductions * 1000 (repeat 2)))
 
@@ -45,8 +51,7 @@
         (m/amb
          (m/? (m/sleep interval-ms value))
          (recur))))
-    (m/reductions {} value)
-    (m/latest identity))))
+    (continue-flow value))))
 
 (defn concurrent-exec-flow
   "Return a flow.
@@ -82,6 +87,25 @@
 (defn run-task-throw
   [task key & {:keys [succ]}]
   (task (or succ #(prn key :succ %)) #(throw (ex-info "task failed" {:key key :e %}))))
+
+(defonce ^:private *background-task-cancelers ; key -> canceler
+  (volatile! {}))
+
+(defn run-background-task
+  "Run task.
+  Cancel last same key background-task if exists(to avoid: reload cljs then run multiple same tasks)"
+  [key' task]
+  (when-let [canceler (get @*background-task-cancelers key')]
+    (canceler)
+    (vswap! *background-task-cancelers assoc key' nil))
+  (prn :run-background-task key')
+  (let [canceler (run-task task key')]
+    (vswap! *background-task-cancelers assoc key' canceler)
+    nil))
+
+(defn background-task-running?
+  [key']
+  (contains? @*background-task-cancelers key'))
 
 (comment
   (defn >!

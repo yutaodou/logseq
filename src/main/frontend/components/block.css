@@ -101,7 +101,7 @@
 }
 
 .breadcrumb {
-  @apply flex flex-row items-center;
+  @apply flex flex-row items-center flex-wrap;
 
   .asset-container > img {
     height: 18px;
@@ -949,7 +949,7 @@ html.is-mac {
 
 .positioned-properties.block-right {
   button {
-    @apply whitespace-nowrap mr-0.5;
+    @apply whitespace-nowrap;
   }
 
   .block-title-wrap {
@@ -961,24 +961,31 @@ html.is-mac {
   .block-content.inline {
     @apply flex;
   }
+
+  .property-k {
+    color: var(--ls-primary-text-color);
+  }
 }
 
 .block-tags {
   @apply flex flex-row flex-wrap self-start items-center;
   min-height: 24px;
   max-width: 256px;
-  margin-right: -16px;
 }
 
 .block-tag {
-  @apply pr-1 flex flex-row items-center gap-1;
+  @apply flex flex-row items-center;
 }
 
 .block-tag a.tag {
   @apply flex text-sm font-normal items-center opacity-70;
 }
 
-.block-tag a.tag:hover {
+.block-tag a.hash-symbol {
+    @apply text-sm text-sm font-normal opacity-70;
+}
+
+.block-tag a.tag:hover, .block-tag a.hash-symbol:hover {
   @apply opacity-100;
 }
 
@@ -1014,11 +1021,11 @@ html.is-mac {
 }
 
 .ls-page-title .block-tags {
-  @apply relative -right-1 min-h-full;
+  @apply relative min-h-full;
 }
 
 .ls-code-editor-wrap {
-  @apply relative w-full;
+  @apply relative w-full overflow-hidden rounded;
 
   .extensions__code-lang {
     @apply hidden;
@@ -1061,4 +1068,9 @@ html.is-mac {
 .recent-block {
   transition: background-color 0.2s cubic-bezier(0, 1, 0, 1);
   background-color: var(--ls-secondary-background-color, var(--rx-gray-03));
+}
+
+.aspect-video {
+  aspect-ratio: 16 / 9;
+  height: auto;
 }

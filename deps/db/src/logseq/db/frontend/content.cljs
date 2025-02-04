@@ -4,7 +4,8 @@
             [logseq.common.util.page-ref :as page-ref]
             [datascript.core :as d]
             [logseq.common.util :as common-util]
-            [logseq.db.frontend.entity-util :as entity-util]))
+            [logseq.db.frontend.entity-util :as entity-util]
+            [logseq.db.frontend.entity-plus :as entity-plus]))
 
 ;; [[uuid]]
 (def id-ref-pattern
@@ -32,8 +33,9 @@
   [refs]
   (sort-by
    (fn [ref]
-     [(boolean (re-find page-ref/page-ref-without-nested-re (:block/title ref)))
-      (:block/title ref)])
+     (when-let [title (and (map? ref) (:block/title ref))]
+       [(boolean (re-find page-ref/page-ref-without-nested-re (:block/title ref)))
+        title]))
    >
    refs))
 
@@ -120,7 +122,7 @@
 (defn update-block-content
   "Replace `[[internal-id]]` with `[[page name]]`"
   [db item eid]
-  (if (entity-util/db-based-graph? db)
+  (if (entity-plus/db-based-graph? db)
     (if-let [content (:block/title item)]
       (let [refs (:block/refs (d/entity db eid))]
         (assoc item :block/title (id-ref->title-ref content refs false)))
@@ -128,8 +130,8 @@
     item))
 
 (defn replace-tags-with-id-refs
-  "Replace tags in content with page-ref ids. Ignore case because tags in
-  content can have any case and still have a valid ref"
+  "Replace tag names in content with page-ref ids e.g. #TAG -> [[UUID]].
+   Ignore case because tags in content can have any case and still have a valid ref"
   [content tags]
   (->>
    (reduce
@@ -142,6 +144,24 @@
              id-ref)
             ;; #book
             (common-util/replace-ignore-case (str "#" (:block/title tag)) id-ref))))
+    content
+    (sort-refs tags))
+   (string/trim)))
+
+(defn replace-tag-refs-with-page-refs
+  "Replace tag refs in content with page refs e.g. #[[UUID]] -> [[UUID]]"
+  [content tags]
+  (->>
+   (reduce
+    (fn [content tag]
+      (let [id-ref (page-ref/->page-ref (:block/uuid tag))]
+        (-> content
+            ;; #[[favorite book]]
+            (common-util/replace-ignore-case
+             (str "#" id-ref)
+             id-ref)
+            ;; #book
+            (common-util/replace-ignore-case (str "#" id-ref) id-ref))))
     content
     (sort-refs tags))
    (string/trim)))

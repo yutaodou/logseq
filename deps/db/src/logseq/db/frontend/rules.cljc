@@ -155,7 +155,18 @@
    (dissoc query-dsl-rules :namespace
            :page-property :has-page-property
            :page-tags :all-page-tags)
-   {:existing-property-value
+
+   (dissoc rules :namespace)
+
+   {:between
+    '[(between ?b ?start ?end)
+      [?b :block/page ?p]
+      [?p :block/tags :logseq.class/Journal]
+      [?p :block/journal-day ?d]
+      [(>= ?d ?start)]
+      [(<= ?d ?end)]]
+
+    :existing-property-value
     '[;; non-ref value
       [(existing-property-value ?b ?prop ?val)
        [?prop-e :db/ident ?prop]
@@ -167,7 +178,7 @@
        [?prop-e :db/valueType :db.type/ref]
        [?b ?prop ?pv]
        (or [?pv :block/title ?val]
-           [?pv :property.value/content ?val])]]
+           [?pv :logseq.property/value ?val])]]
 
     :property-missing-value
     '[(property-missing-value ?b ?prop-e ?default-p ?default-v)
@@ -191,7 +202,7 @@
       (property-missing-value ?b ?prop-e ?default-p ?default-v)
       (or
        [?default-v :block/title ?val]
-       [?default-v :property.value/content ?val])]
+       [?default-v :logseq.property/value ?val])]
 
     :property-value
     '[[(property-value ?b ?prop-e ?val)
@@ -210,7 +221,10 @@
     '[(object-has-class-property? ?b ?prop)
       [?prop-e :db/ident ?prop]
       [?t :logseq.property.class/properties ?prop-e]
-      [?b :block/tags ?t]]
+      [?b :block/tags ?tc]
+      (or
+       [(= ?t ?tc)]
+       (parent ?t ?tc))]
 
     :has-property-or-default-value
     '[(has-property-or-default-value? ?b ?prop)
@@ -225,17 +239,17 @@
     :has-simple-query-property
     '[(has-simple-query-property ?b ?prop)
       [?prop-e :db/ident ?prop]
-      [?prop-e :block/type "property"]
+      [?prop-e :block/tags :logseq.class/Property]
       (has-property-or-default-value? ?b ?prop)
-      [?prop-e :block/schema ?prop-schema]
-      [(get ?prop-schema :public? true) ?public]
-      [(= true ?public)]]
+      (or
+       [(missing? $ ?prop-e :logseq.property/public?)]
+       [?prop-e :logseq.property/public? true])]
 
     ;; Same as has-simple-query-property except it returns public and private properties like :block/title
     :has-private-simple-query-property
     '[(has-private-simple-query-property ?b ?prop)
       [?prop-e :db/ident ?prop]
-      [?prop-e :block/type "property"]
+      [?prop-e :block/tags :logseq.class/Property]
       (has-property-or-default-value? ?b ?prop)]
 
     ;; Checks if a property exists for any features that are not simple queries
@@ -243,19 +257,19 @@
     '[(has-property ?b ?prop)
       [?b ?prop _]
       [?prop-e :db/ident ?prop]
-      [?prop-e :block/type "property"]
-      [?prop-e :block/schema ?prop-schema]
-      [(get ?prop-schema :public? true) ?public]
-      [(= true ?public)]]
+      [?prop-e :block/tags :logseq.class/Property]
+      (or
+       [(missing? $ ?prop-e :logseq.property/public?)]
+       [?prop-e :logseq.property/public? true])]
 
     ;; Checks if a property has a value for any features that are not simple queries
     :property
     '[(property ?b ?prop ?val)
       [?prop-e :db/ident ?prop]
-      [?prop-e :block/type "property"]
-      [?prop-e :block/schema ?prop-schema]
-      [(get ?prop-schema :public? true) ?public]
-      [(= true ?public)]
+      [?prop-e :block/tags :logseq.class/Property]
+      (or
+       [(missing? $ ?prop-e :logseq.property/public?)]
+       [?prop-e :logseq.property/public? true])
       [?b ?prop ?pv]
       (or
        ;; non-ref value
@@ -266,24 +280,23 @@
        (and
         [?prop-e :db/valueType :db.type/ref]
         (or [?pv :block/title ?val]
-            [?pv :property.value/content ?val])))]
+            [?pv :logseq.property/value ?val])))]
 
     ;; Checks if a property has a value for simple queries. Supports default values
     :simple-query-property
     '[(simple-query-property ?b ?prop ?val)
       [?prop-e :db/ident ?prop]
-      [?prop-e :block/type "property"]
-      [?prop-e :block/schema ?prop-schema]
-      [(get ?prop-schema :public? true) ?public]
-      [(get ?prop-schema :type) ?type]
-      [(= true ?public)]
+      [?prop-e :block/tags :logseq.class/Property]
+      (or
+       [(missing? $ ?prop-e :logseq.property/public?)]
+       [?prop-e :logseq.property/public? true])
       (property-value ?b ?prop-e ?val)]
 
     ;; Same as property except it returns public and private properties like :block/title
     :private-simple-query-property
     '[(private-simple-query-property ?b ?prop ?val)
       [?prop-e :db/ident ?prop]
-      [?prop-e :block/type "property"]
+      [?prop-e :block/tags :logseq.class/Property]
       (property-value ?b ?prop-e ?val)]
 
     :tags
@@ -296,23 +309,24 @@
     :task
     '[(task ?b ?statuses)
       ;; and needed to avoid binding error
-      (and (property ?b :logseq.task/status ?val)
+      (and (simple-query-property ?b :logseq.task/status ?val)
            [(contains? ?statuses ?val)])]
 
     :priority
     '[(priority ?b ?priorities)
       ;; and needed to avoid binding error
-      (and (property ?b :logseq.task/priority ?priority)
+      (and (simple-query-property ?b :logseq.task/priority ?priority)
            [(contains? ?priorities ?priority)])]}))
 
 (def rules-dependencies
   "For db graphs, a map of rule names and the rules they depend on. If this map
   becomes long or brittle, we could do scan rules for their deps with something
   like find-rules-in-where"
-  {:task #{:property}
-   :priority #{:property}
+  {:task #{:simple-query-property}
+   :priority #{:simple-query-property}
    :property-missing-value #{:object-has-class-property}
    :has-property-or-default-value #{:object-has-class-property}
+   :object-has-class-property #{:parent}
    :has-simple-query-property #{:has-property-or-default-value}
    :has-private-simple-query-property #{:has-property-or-default-value}
    :property-default-value #{:existing-property-value :property-missing-value}

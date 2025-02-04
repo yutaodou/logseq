@@ -1,34 +1,35 @@
 (ns logseq.graph-parser.exporter
   "Exports a file graph to DB graph. Used by the File to DB graph importer and
   by nbb-logseq CLIs"
-  (:require [clojure.set :as set]
-            [clojure.string :as string]
+  (:require [cljs-time.coerce :as tc]
+            [cljs.pprint]
             [clojure.edn :as edn]
+            [clojure.set :as set]
+            [clojure.string :as string]
             [datascript.core :as d]
-            [logseq.graph-parser.extract :as extract]
-            [logseq.common.uuid :as common-uuid]
+            [logseq.common.config :as common-config]
             [logseq.common.path :as path]
             [logseq.common.util :as common-util]
-            [logseq.common.config :as common-config]
-            [logseq.db.frontend.content :as db-content]
-            [logseq.db.frontend.property :as db-property]
-            [logseq.db.frontend.property.type :as db-property-type]
-            [logseq.common.util.macro :as macro-util]
             [logseq.common.util.date-time :as date-time-util]
-            [logseq.db.sqlite.util :as sqlite-util]
-            [logseq.db :as ldb]
-            [logseq.db.frontend.rules :as rules]
-            [logseq.db.frontend.class :as db-class]
+            [logseq.common.util.macro :as macro-util]
+            [logseq.common.util.namespace :as ns-util]
             [logseq.common.util.page-ref :as page-ref]
-            [promesa.core :as p]
-            [cljs.pprint]
-            [logseq.db.frontend.order :as db-order]
+            [logseq.common.uuid :as common-uuid]
+            [logseq.db :as ldb]
+            [logseq.db.frontend.class :as db-class]
+            [logseq.db.frontend.content :as db-content]
             [logseq.db.frontend.db-ident :as db-ident]
-            [logseq.db.frontend.property.build :as db-property-build]
             [logseq.db.frontend.malli-schema :as db-malli-schema]
-            [logseq.graph-parser.property :as gp-property]
+            [logseq.db.frontend.order :as db-order]
+            [logseq.db.frontend.property :as db-property]
+            [logseq.db.frontend.property.build :as db-property-build]
+            [logseq.db.frontend.property.type :as db-property-type]
+            [logseq.db.frontend.rules :as rules]
+            [logseq.db.sqlite.util :as sqlite-util]
             [logseq.graph-parser.block :as gp-block]
-            [logseq.common.util.namespace :as ns-util]))
+            [logseq.graph-parser.extract :as extract]
+            [logseq.graph-parser.property :as gp-property]
+            [promesa.core :as p]))
 
 (defn- add-missing-timestamps
   "Add updated-at or created-at timestamps if they doesn't exist"
@@ -48,18 +49,22 @@
             :block/title new-title
             :block/name (common-util/page-name-sanity-lc new-title)})))
 
-(defn- get-page-uuid [page-names-to-uuids page-name]
-  (or (get @page-names-to-uuids (if (string/includes? (str page-name) "#")
-                                  (string/lower-case (gp-block/sanitize-hashtag-name page-name))
-                                  page-name))
+(defn- get-page-uuid [page-names-to-uuids page-name ex-data']
+  (or (get @page-names-to-uuids (some-> (if (string/includes? (str page-name) "#")
+                                          (string/lower-case (gp-block/sanitize-hashtag-name page-name))
+                                          page-name)
+                                        string/trimr))
       (throw (ex-info (str "No uuid found for page name " (pr-str page-name))
-                      {:page-name page-name}))))
+                      (merge ex-data' {:page-name page-name
+                                       :page-names (sort (keys @page-names-to-uuids))})))))
 
 (defn- replace-namespace-with-parent [block page-names-to-uuids]
   (if (:block/namespace block)
     (-> (dissoc block :block/namespace)
         (assoc :logseq.property/parent
-               {:block/uuid (get-page-uuid page-names-to-uuids (get-in block [:block/namespace :block/name]))}))
+               {:block/uuid (get-page-uuid page-names-to-uuids
+                                           (get-in block [:block/namespace :block/name])
+                                           {:block block :block/namespace (:block/namespace block)})}))
     block))
 
 (defn- build-class-ident-name
@@ -70,20 +75,23 @@
   ([db class-name all-idents]
    (find-or-create-class db class-name all-idents {}))
   ([db class-name all-idents class-block]
-   (if-let [db-ident (get @all-idents (keyword class-name))]
-     {:db/ident db-ident}
-     (let [m
-           (if (:block/namespace class-block)
-             ;; Give namespaced tags a unique ident so they don't conflict with other tags
-             (-> (db-class/build-new-class db {:block/title (build-class-ident-name class-name)})
-                 (merge {:block/title class-name
-                         :block/name (common-util/page-name-sanity-lc class-name)})
-                 (build-new-namespace-page))
-             (db-class/build-new-class db
-                                       {:block/title class-name
-                                        :block/name (common-util/page-name-sanity-lc class-name)}))]
-       (swap! all-idents assoc (keyword class-name) (:db/ident m))
-       (with-meta m {:new-class? true})))))
+   (let [ident (keyword class-name)]
+     (if-let [db-ident (get @all-idents ident)]
+       {:db/ident db-ident}
+       (let [m
+             (if (:block/namespace class-block)
+               ;; Give namespaced tags a unique ident so they don't conflict with other tags
+               (-> (db-class/build-new-class db (merge {:block/title (build-class-ident-name class-name)}
+                                                       (select-keys class-block [:block/tags])))
+                   (merge {:block/title class-name
+                           :block/name (common-util/page-name-sanity-lc class-name)})
+                   (build-new-namespace-page))
+               (db-class/build-new-class db
+                                         (assoc {:block/title class-name
+                                                 :block/name (common-util/page-name-sanity-lc class-name)}
+                                                :block/tags (:block/tags class-block))))]
+         (swap! all-idents assoc ident (:db/ident m))
+         (with-meta m {:new-class? true}))))))
 
 (defn- find-or-gen-class-uuid [page-names-to-uuids page-name db-ident & {:keys [temp-new-class?]}]
   (or (if temp-new-class?
@@ -113,7 +121,7 @@
   (if block-ns
     (->> (d/q '[:find [?b ...]
                 :in $ ?name
-                :where [?b :block/uuid ?uuid] [?b :block/type "class"] [?b :block/name ?name]]
+                :where [?b :block/uuid ?uuid] [?b :block/tags :logseq.class/Tag] [?b :block/name ?name]]
               db
               (ns-util/get-last-part full-name))
          (map #(d/entity db %))
@@ -125,7 +133,7 @@
     (first
      (d/q '[:find [?uuid ...]
             :in $ ?name
-            :where [?b :block/uuid ?uuid] [?b :block/type "class"] [?b :block/name ?name]]
+            :where [?b :block/uuid ?uuid] [?b :block/tags :logseq.class/Tag] [?b :block/name ?name]]
           db
           full-name))))
 
@@ -142,25 +150,34 @@
       (assert (:block/uuid class-m') "Class must have a :block/uuid")
       [:block/uuid (:block/uuid class-m')])
     (when (convert-tag? (:block/name tag-block) user-options)
-      (if-let [existing-tag-uuid (find-existing-class db tag-block)]
-        [:block/uuid existing-tag-uuid]
-        ;; Creates or updates page within same tx
-        (let [class-m (find-or-create-class db (:block/title tag-block) all-idents tag-block)
-              class-m' (-> (merge tag-block class-m
-                                  (when-not (:block/uuid tag-block)
-                                    {:block/uuid (find-or-gen-class-uuid page-names-to-uuids (:block/name tag-block) (:db/ident class-m))}))
-                           ;; override with imported timestamps
-                           (dissoc :block/created-at :block/updated-at)
-                           (merge (add-missing-timestamps
-                                   (select-keys tag-block [:block/created-at :block/updated-at])))
-                           (replace-namespace-with-parent page-names-to-uuids))]
-          (when (:new-class? (meta class-m)) (swap! classes-tx conj class-m'))
-          (assert (:block/uuid class-m') "Class must have a :block/uuid")
-          [:block/uuid (:block/uuid class-m')])))))
+      (let [existing-tag-uuid (find-existing-class db tag-block)
+            internal-tag-conflict? (contains? #{"tag" "property" "page" "journal" "asset"} (:block/name tag-block))]
+        (cond
+          ;; Don't overwrite internal tags
+          (and existing-tag-uuid (not internal-tag-conflict?))
+          [:block/uuid existing-tag-uuid]
+
+          :else
+          ;; Creates or updates page within same tx
+          (let [class-m (find-or-create-class db (:block/title tag-block) all-idents tag-block)
+                class-m' (-> (merge tag-block class-m
+                                    (if internal-tag-conflict?
+                                      {:block/uuid (common-uuid/gen-uuid :db-ident-block-uuid (:db/ident class-m))}
+                                      (when-not (:block/uuid tag-block)
+                                        (let [id (find-or-gen-class-uuid page-names-to-uuids (:block/name tag-block) (:db/ident class-m))]
+                                          {:block/uuid id}))))
+                             ;; override with imported timestamps
+                             (dissoc :block/created-at :block/updated-at)
+                             (merge (add-missing-timestamps
+                                     (select-keys tag-block [:block/created-at :block/updated-at])))
+                             (replace-namespace-with-parent page-names-to-uuids))]
+            (when (:new-class? (meta class-m)) (swap! classes-tx conj class-m'))
+            (assert (:block/uuid class-m') "Class must have a :block/uuid")
+            [:block/uuid (:block/uuid class-m')]))))))
 
 (defn- logseq-class-ident?
   [k]
-  (and (qualified-keyword? k) (= "logseq.class" (namespace k))))
+  (and (qualified-keyword? k) (db-class/logseq-class? k)))
 
 (defn- convert-tags-to-classes
   "Handles converting tags to classes and any post processing of it e.g.
@@ -185,17 +202,27 @@
                                       (convert-tag? (:block/name %) user-options)
                                       ;; Ignore new class tags from extract e.g. :logseq.class/Journal
                                       (logseq-class-ident? %)))
-                         (map #(vector :block/uuid (get-page-uuid (:page-names-to-uuids per-file-state) (:block/name %))))
+                         (map #(vector :block/uuid (get-page-uuid (:page-names-to-uuids per-file-state) (:block/name %) {:block %})))
                          set)]
       (cond-> block
         true
         (update :block/tags convert-tags-to-classes db per-file-state user-options all-idents)
+        true
+        (update :block/tags (fn [tags]
+                              (cond-> (set tags)
+                                ;; ensure pages at least have a Page
+                                true
+                                (conj :logseq.class/Page)
+                                ;; Remove Page if another Page-like class is already present
+                                (seq (set/intersection (disj (set tags) :logseq.class/Page)
+                                                       db-class/page-classes))
+                                (disj :logseq.class/Page))))
         (seq page-tags)
         (merge {:logseq.property/page-tags page-tags})))
     block))
 
 (defn- add-uuid-to-page-map [m page-names-to-uuids]
-  (assoc m :block/uuid (get-page-uuid page-names-to-uuids (:block/name m))))
+  (assoc m :block/uuid (get-page-uuid page-names-to-uuids (:block/name m) {:block m})))
 
 (defn- content-without-tags-ignore-case
   "Ignore case because tags in content can have any case and still have a valid ref"
@@ -281,26 +308,27 @@
 (defn- update-block-deadline
   ":block/title doesn't contain DEADLINE.* text so unable to detect timestamp
   or repeater usage and notify user that they aren't supported"
-  [block db {:keys [user-config]}]
+  [block page-names-to-uuids {:keys [user-config]}]
   (if-let [date-int (or (:block/deadline block) (:block/scheduled block))]
-    (let [existing-journal-page (ffirst (d/q '[:find (pull ?b [:block/uuid])
-                                               :in $ ?journal-day
-                                               :where [?b :block/journal-day ?journal-day]]
-                                             db date-int))
+    (let [title (date-time-util/int->journal-title date-int (common-config/get-date-formatter user-config))
+          existing-journal-page (some->> title
+                                         common-util/page-name-sanity-lc
+                                         (get @page-names-to-uuids)
+                                         (hash-map :block/uuid))
           deadline-page (->
                          (or existing-journal-page
                             ;; FIXME: Register new pages so that two different refs to same new page
                             ;; don't create different uuids and thus an invalid page
-                             (let [page-m (sqlite-util/build-new-page
-                                           (date-time-util/int->journal-title date-int (common-config/get-date-formatter user-config)))]
+                             (let [page-m (sqlite-util/build-new-page title)]
                                (assoc page-m
                                       :block/uuid (common-uuid/gen-uuid :journal-page-uuid date-int)
-                                      :block/type "journal"
                                       :block/journal-day date-int)))
-                         (assoc :block/tags :logseq.class/Journal))]
+                         (assoc :block/tags #{:logseq.class/Journal}))
+          time-long (tc/to-long (date-time-util/int->local-date date-int))
+          datetime-property (if (:block/deadline block) :logseq.task/deadline :logseq.task/scheduled)]
       {:block
        (-> block
-           (assoc :logseq.task/deadline [:block/uuid (:block/uuid deadline-page)])
+           (assoc datetime-property time-long)
            (dissoc :block/deadline :block/scheduled :block/repeated?))
        :properties-tx (when-not existing-journal-page [deadline-page])})
     {:block block :properties-tx []}))
@@ -344,7 +372,7 @@
 
 (defn- infer-property-schema-and-get-property-change
   "Infers a property's schema from the given _user_ property value and adds new ones to
-  the property-schemas atom. If a property's :type changes, returns a map of
+  the property-schemas atom. If a property's :logseq.property/type changes, returns a map of
   the schema attribute changed and how it changed e.g. `{:type {:from :default :to :url}}`"
   [db prop-val prop prop-val-text refs {:keys [property-schemas all-idents]} macros]
   ;; Explicitly fail an unexpected case rather than cause silent downstream failures
@@ -364,15 +392,15 @@
                         :else
                         (db-property-type/infer-property-type-from-value
                          (macro-util/expand-value-if-macro prop-val macros)))
-        prev-type (get-in @property-schemas [prop :type])]
+        prev-type (get-in @property-schemas [prop :logseq.property/type])]
     ;; Create new property
     (when-not (get @property-schemas prop)
       (create-property-ident db all-idents prop)
-      (let [schema (cond-> {:type prop-type}
+      (let [schema (cond-> {:logseq.property/type prop-type}
                      (#{:node :date} prop-type)
                      ;; Assume :many for now as detecting that detecting property values across files are consistent
                      ;; isn't possible yet
-                     (assoc :cardinality :many))]
+                     (assoc :db/cardinality :many))]
         (swap! property-schemas assoc prop schema)))
     (when (and prev-type (not= prev-type prop-type))
       {:type {:from prev-type :to prop-type}})))
@@ -380,10 +408,12 @@
 (def built-in-property-name-to-idents
   "Map of all built-in keyword property names to their idents. Using in-memory property
   names because these are legacy names already in a user's file graph"
-  (->> db-property/built-in-properties
-       (map (fn [[k v]]
-              [(:name v) k]))
-       (into {})))
+  (merge (->> (dissoc db-property/built-in-properties :logseq.property/publishing-public?)
+              (map (fn [[k v]]
+                     [(:name v) k]))
+              (into {}))
+         ;; TODO: Move 3 remaining :name config from built-in-properties to here
+         {:public :logseq.property/publishing-public?}))
 
 (def all-built-in-property-names
   "All built-in property names as a set of keywords"
@@ -501,7 +531,7 @@
   [page-names-to-uuids property-values]
   (set (map #(vector :block/uuid
                      ;; assume for now a ref's :block/name can always be translated by lc helper
-                     (get-page-uuid page-names-to-uuids (common-util/page-name-sanity-lc %)))
+                     (get-page-uuid page-names-to-uuids (common-util/page-name-sanity-lc %) {:original-name %}))
             property-values)))
 
 (defn- handle-changed-property
@@ -527,7 +557,7 @@
       ;; Change to :node as dates can be pages but pages can't be dates
       (= {:from :date :to :node} type-change)
       (do
-        (swap! property-schemas assoc-in [prop :type] :node)
+        (swap! property-schemas assoc-in [prop :logseq.property/type] :node)
         (update-page-or-date-values page-names-to-uuids val))
 
       ;; Unlike the other property changes, this one changes all the previous values of a property
@@ -540,9 +570,9 @@
           (swap! ignored-properties conj {:property prop :value val :schema (get property-changes prop)})
           nil)
         (do
-          (swap! upstream-properties assoc prop {:schema {:type :default}
+          (swap! upstream-properties assoc prop {:schema {:logseq.property/type :default}
                                                  :from-type (:from type-change)})
-          (swap! property-schemas assoc prop {:type :default})
+          (swap! property-schemas assoc prop {:logseq.property/type :default})
           (get properties-text-values prop)))
 
       :else
@@ -562,7 +592,7 @@
                    [prop val'])
                  [prop
                   (if (set? val)
-                    (if (= :default (:type (get @property-schemas prop)))
+                    (if (= :default (:logseq.property/type (get @property-schemas prop)))
                       (get properties-text-values prop)
                       (update-page-or-date-values page-names-to-uuids val))
                     val)])))
@@ -579,12 +609,13 @@
                             ;; closed values are referenced by their :db/ident so no need to create values
                             (not (get-in db-property/built-in-properties [k :closed-values])))
                    (let [property-map {:db/ident k
-                                       :block/schema {:type built-in-type}}]
+                                       :logseq.property/type built-in-type}]
                      [property-map v]))
-                 (when (db-property-type/value-ref-property-types (:type (get-schema-fn k)))
-                   (let [property-map {:db/ident (get-ident all-idents k)
-                                       :original-property-id k
-                                       :block/schema (get-schema-fn k)}]
+                 (when (db-property-type/value-ref-property-types (:logseq.property/type (get-schema-fn k)))
+                   (let [property-map (merge
+                                       {:db/ident (get-ident all-idents k)
+                                        :original-property-id k}
+                                       (get-schema-fn k))]
                      [property-map v])))))
        (db-property-build/build-property-values-tx-m new-block)))
 
@@ -601,7 +632,9 @@
       (swap! (:block-properties-text-values import-state)
              assoc
              ;; For pages, valid uuid is in page-names-to-uuids, not in block
-             (if (:block/name block) (get-page-uuid page-names-to-uuids ((some-fn ::original-name :block/name) block)) (:block/uuid block))
+             (if (:block/name block)
+               (get-page-uuid page-names-to-uuids ((some-fn ::original-name :block/name) block) {:block block})
+               (:block/uuid block))
              properties-text-values))
     ;; TODO: Add import support for :template. Ignore for now as they cause invalid property types
     (if (contains? props :template)
@@ -695,36 +728,38 @@
              (seq classes-from-properties)
              ;; Add a map of {:block.temp/new-class TAG} to be processed later
              (update :block/tags
-                     (fnil into [])
-                     (map #(hash-map :block.temp/new-class %) classes-from-properties)))
+                     (fn [tags]
+                       (let [tags' (if (sequential? tags) tags (set tags))]
+                         (into tags' (map #(hash-map :block.temp/new-class %) classes-from-properties))))))
            :properties-tx pvalues-tx})
         {:block block :properties-tx []})
       (update :block dissoc :block/properties :block/properties-text-values :block/properties-order :block/invalid-properties)))
 
 (defn- handle-page-properties
   "Adds page properties including special handling for :logseq.property/parent"
-  [{:block/keys [properties] :as block*} db {:keys [page-names-to-uuids]} refs
+  [{:block/keys [properties] :as block*} db {:keys [page-names-to-uuids classes-tx]} refs
    {:keys [user-options log-fn import-state] :as options}]
   (let [{:keys [block properties-tx]} (handle-page-and-block-properties block* db page-names-to-uuids refs options)
         block'
-        (if (seq properties)
-          (let [parent-classes-from-properties (->> (select-keys properties (:property-parent-classes user-options))
-                                                    (mapcat (fn [[_k v]] (if (coll? v) v [v])))
-                                                    distinct)]
-            ;; TODO: Mv new classes from these find-or-create-class to :classes-tx as they are the only ones
-            ;; that aren't conrolled by :classes-tx
-            (cond-> block
-              (seq parent-classes-from-properties)
-              (merge (find-or-create-class db ((some-fn ::original-title :block/title) block) (:all-idents import-state) block))
-              (seq parent-classes-from-properties)
-              (assoc :logseq.property/parent
-                     (let [new-class (first parent-classes-from-properties)
-                           class-m (find-or-create-class db new-class (:all-idents import-state))]
-                       (when (> (count parent-classes-from-properties) 1)
-                         (log-fn :skipped-parent-classes "Only one parent class is allowed so skipped ones after the first one" :classes parent-classes-from-properties))
-                       (merge class-m
-                              {:block/uuid (find-or-gen-class-uuid page-names-to-uuids (common-util/page-name-sanity-lc new-class) (:db/ident class-m))})))))
-          (dissoc block* :block/properties))
+        (if-let [parent-classes-from-properties (->> (select-keys properties (:property-parent-classes user-options))
+                                                     (mapcat (fn [[_k v]] (if (coll? v) v [v])))
+                                                     distinct
+                                                     seq)]
+          (let [_ (swap! (:classes-from-property-parents import-state) conj (:block/title block*))
+                class-m (find-or-create-class db ((some-fn ::original-title :block/title) block) (:all-idents import-state) block)
+                class-m' (-> block
+                             (merge class-m)
+                             (assoc :logseq.property/parent
+                                    (let [new-class (first parent-classes-from-properties)
+                                          class-m (find-or-create-class db new-class (:all-idents import-state))
+                                          class-m' (merge class-m
+                                                          {:block/uuid (find-or-gen-class-uuid page-names-to-uuids (common-util/page-name-sanity-lc new-class) (:db/ident class-m))})]
+                                      (when (> (count parent-classes-from-properties) 1)
+                                        (log-fn :skipped-parent-classes "Only one parent class is allowed so skipped ones after the first one" :classes parent-classes-from-properties))
+                                      (when (:new-class? (meta class-m)) (swap! classes-tx conj class-m'))
+                                      [:block/uuid (:block/uuid class-m')])))]
+            class-m')
+          block)
         block'' (replace-namespace-with-parent block' page-names-to-uuids)]
     {:block block'' :properties-tx properties-tx}))
 
@@ -824,7 +859,7 @@
   [{:block/keys [parent] :as block} pre-blocks page-names-to-uuids]
   (cond-> block
     (and (vector? parent) (contains? pre-blocks (second parent)))
-    (assoc :block/parent [:block/uuid (get-page-uuid page-names-to-uuids (second (:block/page block)))])))
+    (assoc :block/parent [:block/uuid (get-page-uuid page-names-to-uuids (second (:block/page block)) {:block block :block/page (:block/page block)})])))
 
 (defn- fix-block-name-lookup-ref
   "Some graph-parser attributes return :block/name as a lookup ref. This fixes
@@ -832,9 +867,9 @@
   [block page-names-to-uuids]
   (cond-> block
     (= :block/name (first (:block/page block)))
-    (assoc :block/page [:block/uuid (get-page-uuid page-names-to-uuids (second (:block/page block)))])
+    (assoc :block/page [:block/uuid (get-page-uuid page-names-to-uuids (second (:block/page block)) {:block block :block/page (:block/page block)})])
     (:block/name (:block/parent block))
-    (assoc :block/parent {:block/uuid (get-page-uuid page-names-to-uuids (:block/name (:block/parent block)))})))
+    (assoc :block/parent {:block/uuid (get-page-uuid page-names-to-uuids (:block/name (:block/parent block)) {:block block :block/parent (:block/parent block)})})))
 
 (defn- build-block-tx
   [db block* pre-blocks {:keys [page-names-to-uuids] :as per-file-state} {:keys [import-state journal-created-ats] :as options}]
@@ -842,7 +877,7 @@
   (let [;; needs to come before update-block-refs to detect new property schemas
         {:keys [block properties-tx]}
         (handle-block-properties block* db page-names-to-uuids (:block/refs block*) options)
-        {block-after-built-in-props :block deadline-properties-tx :properties-tx} (update-block-deadline block db options)
+        {block-after-built-in-props :block deadline-properties-tx :properties-tx} (update-block-deadline block page-names-to-uuids options)
         ;; :block/page should be [:block/page NAME]
         journal-page-created-at (some-> (:block/page block*) second journal-created-ats)
         prepared-block (cond-> block-after-built-in-props
@@ -857,17 +892,16 @@
                    (update-block-priority options)
                    add-missing-timestamps
                    ;; old whiteboards may have this
-                   (dissoc :block/left)
+                   (dissoc :block/left :block/format)
                    ;; ((fn [x] (prn :block-out x) x))
-                   ;; TODO: org-mode content needs to be handled
-                   (assoc :block/format :markdown))]
+                   )]
     ;; Order matters as properties are referenced in block
     (concat properties-tx deadline-properties-tx [block'])))
 
 (defn- update-page-alias
   [m page-names-to-uuids]
   (update m :block/alias (fn [aliases]
-                           (map #(vector :block/uuid (get-page-uuid page-names-to-uuids (:block/name %)))
+                           (map #(vector :block/uuid (get-page-uuid page-names-to-uuids (:block/name %) {:block %}))
                                 aliases))))
 
 (defn- build-new-page-or-class
@@ -881,8 +915,6 @@
         (journal-created-ats (:block/name m))
         (assoc :block/created-at (journal-created-ats (:block/name m))))
       add-missing-timestamps
-      ;; TODO: org-mode content needs to be handled
-      (assoc :block/format :markdown)
       (dissoc :block/whiteboard?)
       (update-page-tags db user-options per-file-state all-idents)))
 
@@ -890,7 +922,7 @@
   "Returns a map of unique page names mapped to their uuids. The page names
    are in a format that is compatible with extract/extract e.g. namespace pages have
    their full hierarchy in the name"
-  [db]
+  [db classes-from-property-parents]
   (->> db
        ;; don't fetch built-in as that would give the wrong entity if a user used
        ;; a db-only built-in property name e.g. description
@@ -899,6 +931,8 @@
        (map #(d/entity db %))
        (map #(vector
               (if-let [parents (and (or (ldb/internal-page? %) (ldb/class? %))
+                                    ;; These classes have parents now but don't in file graphs (and in extract)
+                                    (not (contains? classes-from-property-parents (:block/title %)))
                                     (->> (ldb/get-page-parents %)
                                          (remove (fn [e] (= :logseq.class/Root (:db/ident e))))
                                          seq))]
@@ -907,7 +941,7 @@
                 (:block/name %))
               (or (:block/uuid %)
                   (throw (ex-info (str "No uuid for existing page " (pr-str (:block/name %)))
-                                  (select-keys % [:block/name :block/type]))))))
+                                  (select-keys % [:block/name :block/tags]))))))
        (into {})))
 
 (defn- build-existing-page
@@ -915,13 +949,10 @@
   (let [;; These attributes are not allowed to be transacted because they must not change across files
         disallowed-attributes [:block/name :block/uuid :block/format :block/title :block/journal-day
                                :block/created-at :block/updated-at]
-        allowed-attributes (into [:block/tags :block/alias :logseq.property/parent :block/type :db/ident]
+        allowed-attributes (into [:block/tags :block/alias :logseq.property/parent :db/ident]
                                  (keep #(when (db-malli-schema/user-property? (key %)) (key %))
                                        m))
-        block-changes (cond-> (select-keys m allowed-attributes)
-                        ;; disallow any type -> "page" but do allow any conversion to a non-page type
-                        (ldb/internal-page? m)
-                        (dissoc :block/type))]
+        block-changes (select-keys m allowed-attributes)]
     (when-let [ignored-attrs (not-empty (apply dissoc m (into disallowed-attributes allowed-attributes)))]
       (notify-user {:msg (str "Import ignored the following attributes on page " (pr-str (:block/title m)) ": "
                               ignored-attrs)}))
@@ -952,9 +983,11 @@
             (assoc :block/uuid (d/squuid))
             ;; only happens for few file built-ins like tags and alias
             (and (contains? all-built-in-names (keyword (:block/name page)))
-                 (not (:block/type page)))
-            (assoc :block/type "page")))]
+                 (not (:block/tags page)))
+            (assoc :block/tags [:logseq.class/Page])))]
     (cond-> page'
+      true
+      (dissoc :block/format)
       (:block/namespace page)
       ((fn [block']
          (merge (build-new-namespace-page block')
@@ -976,7 +1009,7 @@
                         ;; remove file path relative
                         (map #(dissoc % :block/file)))
         ;; Fetch all named ents once per import file to speed up named lookups
-        all-existing-page-uuids (get-all-existing-page-uuids @conn)
+        all-existing-page-uuids (get-all-existing-page-uuids @conn @(:classes-from-property-parents import-state))
         all-pages (map #(modify-page-tx % all-existing-page-uuids) all-pages*)
         all-new-page-uuids (->> all-pages
                                 (remove #(all-existing-page-uuids (or (::original-name %) (:block/name %))))
@@ -993,7 +1026,7 @@
                                                          (all-existing-page-uuids (::original-name m))
                                                          (all-existing-page-uuids (:block/name m)))]
                                       (build-existing-page (dissoc m ::original-name ::original-title) @conn page-uuid per-file-state options)
-                                      (when (or (= "class" (:block/type m))
+                                      (when (or (ldb/class? m)
                                                 ;; Don't build a new page if it overwrites an existing class
                                                 (not (some-> (get @(:all-idents import-state)
                                                                   (some-> (or (::original-title m) (:block/title m))
@@ -1063,9 +1096,9 @@
            (fn [[prop {:keys [schema from-type]}]]
              (let [prop-ident (get-ident all-idents prop)
                    upstream-tx
-                   (when (= :default (:type schema))
+                   (when (= :default (:logseq.property/type schema))
                      (build-upstream-properties-tx-for-default db prop prop-ident from-type block-properties-text-values))
-                   property-pages-tx [{:db/ident prop-ident :block/schema schema}]]
+                   property-pages-tx [(merge {:db/ident prop-ident} schema)]]
                ;; If we handle cardinality changes we would need to return these separately
                ;; as property-pages would need to be transacted separately
                (concat property-pages-tx upstream-tx)))
@@ -1081,11 +1114,15 @@
    ;; Properties are ignored to keep graph valid and notify users of ignored properties.
    ;; Properties with :schema are ignored due to property schema changes
    :ignored-properties (atom [])
-   ;; Map of property names (keyword) and their current schemas (map).
+   ;; Vec of maps with keys :path and :reason
+   :ignored-files (atom [])
+   ;; Map of property names (keyword) and their current schemas (map of qualified properties).
    ;; Used for adding schemas to properties and detecting changes across a property's usage
    :property-schemas (atom {})
    ;; Map of property or class names (keyword) to db-ident keywords
    :all-idents (atom {})
+   ;; Set of children pages turned into classes by :property-parent-classes option
+   :classes-from-property-parents (atom #{})
    ;; Map of block uuids to their :block/properties-text-values value.
    ;; Used if a property value changes to :default
    :block-properties-text-values (atom {})})
@@ -1133,18 +1170,22 @@
                                                               (get-property-schema @(:property-schemas import-state) kw-name)
                                                               {:title (name kw-name)})]
                  (assert existing-page-uuid)
-                 (merge (select-keys new-prop [:block/type :block/schema :db/ident :db/index :db/cardinality :db/valueType])
+                 (merge (select-keys new-prop [:block/tags :db/ident :logseq.property/type :db/index :db/cardinality :db/valueType])
                         {:block/uuid existing-page-uuid})))
              (set/intersection new-properties (set (map keyword (keys existing-pages)))))
+        ;; Could do this only for existing pages but the added complexity isn't worth reducing the tx noise
+        retract-page-tag-from-properties-tx (map #(vector :db/retract [:block/uuid (:block/uuid %)] :block/tags :logseq.class/Page)
+                                                 (concat property-pages-tx converted-property-pages-tx))
         ;; Save properties on new property pages separately as they can contain new properties and thus need to be
         ;; transacted separately the property pages
         property-page-properties-tx (keep (fn [b]
                                             (when-let [page-properties (not-empty (db-property/properties b))]
                                               (merge page-properties {:block/uuid (:block/uuid b)
-                                                                      :block/type "property"})))
+                                                                      :block/tags (-> (remove #(= :logseq.class/Page %) (:block/tags page-properties))
+                                                                                      (conj :logseq.class/Property))})))
                                           properties-tx)]
     {:pages-tx pages-tx'
-     :property-pages-tx (concat property-pages-tx converted-property-pages-tx)
+     :property-pages-tx (concat property-pages-tx converted-property-pages-tx retract-page-tag-from-properties-tx)
      :property-page-properties-tx property-page-properties-tx}))
 
 (defn- update-whiteboard-blocks [blocks format]
@@ -1194,8 +1235,10 @@
 
 (defn- extract-pages-and-blocks
   "Main fn which calls graph-parser to convert markdown into data"
-  [db file content {:keys [extract-options notify-user]}]
+  [db file content {:keys [extract-options import-state]}]
   (let [format (common-util/get-format file)
+        ;; TODO: Remove once pdf highlights are supported
+        ignored-highlight-file? (string/starts-with? (str (path/basename file)) "hls__")
         extract-options' (merge {:block-pattern (common-config/get-block-pattern format)
                                  :date-formatter "MMM do, yyyy"
                                  :uri-encoded? false
@@ -1203,7 +1246,7 @@
                                  :filename-format :legacy}
                                 extract-options
                                 {:db db})]
-    (cond (contains? common-config/mldoc-support-formats format)
+    (cond (and (contains? common-config/mldoc-support-formats format) (not ignored-highlight-file?))
           (-> (extract/extract file content extract-options')
               (update :pages (fn [pages]
                                (map #(dissoc % :block.temp/original-page-name) pages)))
@@ -1215,12 +1258,17 @@
                                (->> pages
                                     ;; migrate previous attribute for :block/title
                                     (map #(-> %
-                                              (assoc :block/title (:block/original-name %))
-                                              (dissoc :block/original-name))))))
+                                              (assoc :block/title (or (:block/original-name %) (:block/title %))
+                                                     :block/tags #{:logseq.class/Whiteboard})
+                                              (dissoc :block/type :block/original-name))))))
               (update :blocks update-whiteboard-blocks format))
 
           :else
-          (notify-user {:msg (str "Skipped file since its format is not supported: " file)}))))
+          (if ignored-highlight-file?
+            (swap! (:ignored-files import-state) conj
+                   {:path file :reason :pdf-highlight})
+            (swap! (:ignored-files import-state) conj
+                   {:path file :reason :unsupported-file-format})))))
 
 (defn- build-journal-created-ats
   "Calculate created-at timestamps for journals"
@@ -1229,6 +1277,39 @@
        (map #(when-let [journal-day (:block/journal-day %)]
                [(:block/name %) (date-time-util/journal-day->ms journal-day)]))
        (into {})))
+
+(defn- clean-extra-invalid-tags
+  "If a page/class tx is an existing property or a new or existing class, ensure that
+  it only has one tag by removing :logseq.class/Page from its tx"
+  [db pages-tx' classes-tx existing-pages]
+  ;; TODO: Improve perf if we tracked all created classes in atom
+  (let [existing-classes (->> (d/datoms db :avet :block/tags :logseq.class/Tag)
+                              (map #(d/entity db (:e %)))
+                              (map :block/uuid)
+                              set)
+        classes (set/union existing-classes
+                           (set (map :block/uuid classes-tx)))
+        existing-properties (->> (d/datoms db :avet :block/tags :logseq.class/Property)
+                                 (map #(d/entity db (:e %)))
+                                 (map :block/uuid)
+                                 set)
+        existing-pages' (set/map-invert existing-pages)
+        retract-page-tag-from-existing-pages
+        (->> pages-tx'
+             ;; Existing pages that have converted to property or class
+             (filter #(and (:db/ident %) (get existing-pages' (:block/uuid %))))
+             (mapv #(vector :db/retract [:block/uuid (:block/uuid %)] :block/tags :logseq.class/Page)))]
+    {:pages-tx
+     (mapv (fn [page]
+             (if (or (contains? classes (:block/uuid page))
+                     (contains? existing-properties (:block/uuid page)))
+               (update page :block/tags (fn [tags] (vec (remove #(= % :logseq.class/Page) tags))))
+               page))
+           pages-tx')
+     :retract-page-tags-tx
+     (into (mapv #(vector :db/retract [:block/uuid (:block/uuid %)] :block/tags :logseq.class/Page)
+                 classes-tx)
+           retract-page-tag-from-existing-pages)}))
 
 (defn add-file-to-db-graph
   "Parse file and save parsed data to the given db graph. Options available:
@@ -1257,8 +1338,7 @@
                               (filter ldb/whiteboard?)
                               (map (fn [page-block]
                                      (-> page-block
-                                         (assoc :block/format :markdown
-                                                :logseq.property/ls-type :whiteboard-page)))))
+                                         (assoc :logseq.property/ls-type :whiteboard-page)))))
         pre-blocks (->> blocks (keep #(when (:block/pre-block? %) (:block/uuid %))) set)
         blocks-tx (->> blocks
                        (remove :block/pre-block?)
@@ -1267,12 +1347,15 @@
                        vec)
         {:keys [property-pages-tx property-page-properties-tx] pages-tx' :pages-tx}
         (split-pages-and-properties-tx pages-tx old-properties existing-pages (:import-state options))
+        ;; _ (when (seq property-pages-tx) (cljs.pprint/pprint {:property-pages-tx property-pages-tx}))
         ;; Necessary to transact new property entities first so that block+page properties can be transacted next
-        main-props-tx-report (d/transact! conn property-pages-tx {::new-graph? true})
+        main-props-tx-report (d/transact! conn property-pages-tx {::new-graph? true ::path file})
 
         classes-tx @(:classes-tx tx-options)
+        {:keys [retract-page-tags-tx] pages-tx'' :pages-tx} (clean-extra-invalid-tags @conn pages-tx' classes-tx existing-pages)
+        classes-tx' (concat classes-tx retract-page-tags-tx)
         ;; Build indices
-        pages-index (->> (map #(select-keys % [:block/uuid]) pages-tx')
+        pages-index (->> (map #(select-keys % [:block/uuid]) pages-tx'')
                          (concat (map #(select-keys % [:block/uuid]) classes-tx))
                          distinct)
         block-ids (map (fn [block] {:block/uuid (:block/uuid block)}) blocks-tx)
@@ -1285,15 +1368,18 @@
         blocks-index (set/union (set block-ids) (set block-refs-ids))
         ;; Order matters. pages-index and blocks-index needs to come before their corresponding tx for
         ;; uuids to be valid. Also upstream-properties-tx comes after blocks-tx to possibly override blocks
-        tx (concat whiteboard-pages pages-index page-properties-tx property-page-properties-tx pages-tx' classes-tx blocks-index blocks-tx)
+        tx (concat whiteboard-pages pages-index page-properties-tx property-page-properties-tx pages-tx'' classes-tx' blocks-index blocks-tx)
         tx' (common-util/fast-remove-nils tx)
-        ;; _ (prn :tx-counts (map count (vector whiteboard-pages pages-index page-properties-tx property-page-properties-tx pages-tx' classes-tx blocks-index blocks-tx)))
-        ;; _ (when (not (seq whiteboard-pages)) (cljs.pprint/pprint {#_:property-pages-tx #_property-pages-tx :tx tx'}))
-        main-tx-report (d/transact! conn tx' {::new-graph? true})
+        ;; (prn :tx-counts (map #(vector %1 (count %2))
+        ;;                        [:whiteboard-pages :pages-index :page-properties-tx :property-page-properties-tx :pages-tx' :classes-tx :blocks-index :blocks-tx]
+        ;;                        [whiteboard-pages pages-index page-properties-tx property-page-properties-tx pages-tx' classes-tx blocks-index blocks-tx]))
+        ;; _ (when (not (seq whiteboard-pages)) (cljs.pprint/pprint {#_:property-pages-tx #_property-pages-tx :pages-tx pages-tx :tx tx'}))
+        main-tx-report (d/transact! conn tx' {::new-graph? true ::path file})
 
         upstream-properties-tx
         (build-upstream-properties-tx @conn @(:upstream-properties tx-options) (:import-state options) log-fn)
-        upstream-tx-report (when (seq upstream-properties-tx) (d/transact! conn upstream-properties-tx {::new-graph? true}))]
+        ;; _ (when (seq upstream-properties-tx) (cljs.pprint/pprint {:upstream-properties-tx upstream-properties-tx}))
+        upstream-tx-report (when (seq upstream-properties-tx) (d/transact! conn upstream-properties-tx {::new-graph? true ::path file}))]
 
     ;; Return all tx-reports that occurred in this fn as UI needs to know what changed
     [main-props-tx-report main-tx-report upstream-tx-report]))
@@ -1388,7 +1474,7 @@
 (defn- export-class-properties
   [conn repo-or-conn]
   (let [user-classes (->> (d/q '[:find (pull ?b [:db/id :db/ident])
-                                 :where [?b :block/type "class"]] @conn)
+                                 :where [?b :block/tags :logseq.class/Tag]] @conn)
                           (map first)
                           (remove #(db-class/built-in-classes (:db/ident %))))
         class-to-prop-uuids
@@ -1400,7 +1486,7 @@
                     [(contains? ?user-classes ?class)]
                     [?b ?prop _]
                     [?prop-e :db/ident ?prop]
-                    [?prop-e :block/type "property"]]
+                    [?prop-e :block/tags :logseq.class/Property]]
                   @conn
                   (set (map :db/ident user-classes)))
              (remove #(ldb/built-in? (d/entity @conn (second %))))

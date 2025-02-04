@@ -1,8 +1,8 @@
 (ns frontend.worker.rtc.client-op
   "Store client-ops in a persisted datascript"
   (:require [datascript.core :as d]
-            [frontend.common.missionary-util :as c.m]
-            [frontend.worker.rtc.const :as rtc-const]
+            [frontend.common.missionary :as c.m]
+            [frontend.worker.rtc.malli-schema :as rtc-schema]
             [frontend.worker.state :as worker-state]
             [logseq.db.sqlite.util :as sqlite-util]
             [malli.core :as ma]
@@ -41,7 +41,7 @@
      [:t :int]
      [:value [:map
               [:block-uuid :uuid]
-              [:av-coll [:sequential rtc-const/av-schema]]]]]]
+              [:av-coll [:sequential rtc-schema/av-schema]]]]]]
 
    [:update-asset
     [:catn
@@ -98,6 +98,12 @@
             [:db/add (:e datom) :local-tx t]
             [:db/add "e" :local-tx t])]
       (d/transact! conn [tx-data]))))
+
+(defn remove-local-tx
+  [repo]
+  (when-let [conn (worker-state/get-client-ops-conn repo)]
+    (when-let [datom (first (d/datoms @conn :avet :local-tx))]
+      (d/transact! conn [[:db/retract (:e datom) :local-tx]]))))
 
 (defn get-local-tx
   [repo]
@@ -297,6 +303,20 @@
                                       :remove-asset op}]
                               update-asset-op (conj [:db.fn/retractAttribute e :update-asset]))))))]
             (d/transact! conn tx-data)))))))
+
+(defn add-all-exists-asset-as-ops
+  [repo]
+  (let [conn (worker-state/get-datascript-conn repo)
+        _ (assert (some? conn))
+        asset-block-uuids (d/q '[:find [?block-uuid ...]
+                                 :where
+                                 [?b :block/uuid ?block-uuid]
+                                 [?b :logseq.property.asset/type]]
+                               @conn)
+        ops (map
+             (fn [block-uuid] [:update-asset 1 {:block-uuid block-uuid}])
+             asset-block-uuids)]
+    (add-asset-ops repo ops)))
 
 (defn- get-all-asset-ops*
   [db]

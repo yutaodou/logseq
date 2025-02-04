@@ -1,9 +1,9 @@
 (ns helper
   (:require [cljs.test :as t :refer [is]]
-            [datascript.transit :as dt]
             [const]
             [datascript.core :as d]
-            [frontend.common.missionary-util :as c.m]
+            [datascript.transit :as dt]
+            [frontend.common.missionary :as c.m]
             [frontend.worker.rtc.client-op :as client-op]
             [frontend.worker.rtc.core :as rtc.core]
             [frontend.worker.rtc.log-and-state :as rtc-log-and-state]
@@ -91,11 +91,11 @@
   #_:clj-kondo/ignore
   (me/find
    client-op
-    [?op-type _ {:block-uuid ?block-uuid :av-coll [[!a !v _ !add] ...]}]
-    [?op-type ?block-uuid (map vector !a !v !add)]
+   [?op-type _ {:block-uuid ?block-uuid :av-coll [[!a !v _ !add] ...]}]
+   [?op-type ?block-uuid (map vector !a !v !add)]
 
-    [?op-type _ {:block-uuid ?block-uuid}]
-    [?op-type ?block-uuid]))
+   [?op-type _ {:block-uuid ?block-uuid}]
+   [?op-type ?block-uuid]))
 
 (defn new-task--wait-all-client-ops-sent
   [& {:keys [timeout] :or {timeout 10000}}]
@@ -124,17 +124,15 @@
                     :block/title "message-page"
                     :block/created-at 1725024677501
                     :block/updated-at 1725024677501
-                    :block/type "page"
-                    :block/format :markdown}
+                    :block/type "page"}
                    {:block/uuid (random-uuid)
                     :block/parent "page"
                     :block/order min-order
                     :block/title (dt/write-transit-str message)
                     :block/page "page"
-                    :block/format :markdown
                     :block/updated-at 1724836490810
                     :block/created-at 1724836490810}]]
-      (batch-tx/with-batch-tx-mode conn {:e2e-test const/downloaded-test-repo :skip-store-conn true}
+      (batch-tx/with-batch-tx-mode conn {:e2e-test const/downloaded-test-repo :frontend.worker.pipeline/skip-store-conn true}
         (d/transact! conn tx-data))
       (m/? (new-task--wait-all-client-ops-sent))
       (log :sent-message message))))
@@ -186,7 +184,7 @@
 (defn transact!
   [conn tx-data]
   {:pre [(seq tx-data)]}
-  (batch-tx/with-batch-tx-mode conn {:e2e-test const/downloaded-test-repo :skip-store-conn true}
+  (batch-tx/with-batch-tx-mode conn {:e2e-test const/downloaded-test-repo :frontend.worker.pipeline/skip-store-conn true}
     (d/transact! conn tx-data)))
 
 (def new-task--stop-rtc

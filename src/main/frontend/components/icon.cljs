@@ -1,22 +1,23 @@
 (ns frontend.components.icon
   (:require ["@emoji-mart/data" :as emoji-data]
             ["emoji-mart" :refer [SearchIndex]]
-            [promesa.core :as p]
-            [cljs-bean.core :as bean]
             [camel-snake-kebab.core :as csk]
+            [cljs-bean.core :as bean]
             [clojure.string :as string]
-            [frontend.search :as search]
-            [frontend.storage :as storage]
-            [medley.core :as medley]
-            [rum.core :as rum]
-            [frontend.ui :as ui]
-            [logseq.shui.ui :as shui]
-            [frontend.util :as util]
-            [goog.object :as gobj]
-            [goog.functions :refer [debounce]]
             [frontend.config :as config]
             [frontend.handler.property.util :as pu]
-            [logseq.db :as ldb]))
+            [frontend.hooks :as hooks]
+            [frontend.search :as search]
+            [frontend.storage :as storage]
+            [frontend.ui :as ui]
+            [frontend.util :as util]
+            [goog.functions :refer [debounce]]
+            [goog.object :as gobj]
+            [logseq.db :as ldb]
+            [logseq.shui.ui :as shui]
+            [medley.core :as medley]
+            [promesa.core :as p]
+            [rum.core :as rum]))
 
 (defonce emojis (vals (bean/->clj (gobj/get emoji-data "emojis"))))
 
@@ -24,6 +25,8 @@
   [icon' & [opts]]
   (let [icon' (if (or (string? icon') (keyword? icon'))
                 {:type :tabler-icon :id (name icon')} icon')
+        color? (:color? opts)
+        opts (dissoc opts :color?)
         item (cond
                (and (= :emoji (:type icon')) (:id icon'))
                [:em-emoji (merge {:id (:id icon')
@@ -32,7 +35,7 @@
 
                (and (= :tabler-icon (:type icon')) (:id icon'))
                (ui/icon (:id icon') opts))]
-    (if (:color? opts)
+    (if color?
       [:span.inline-flex.items-center.ls-icon-color-wrap
        {:style {:color (or (some-> icon' :color) "inherit")}} item]
       item)))
@@ -61,7 +64,9 @@
 (defn get-node-icon-cp
   [node-entity opts]
   (let [opts' (merge {:size 14} opts)
-        node-icon (get-node-icon node-entity)]
+        node-icon (if (:own-icon? opts)
+                    (get node-entity (pu/get-pid :logseq.property/icon))
+                    (get-node-icon node-entity))]
     (when-not (or (string/blank? node-icon) (and (contains? #{"letter-n" "page"} node-icon) (:not-text-or-page? opts)))
       [:div.icon-cp-container.flex.items-center
        (merge {:style {:color (or (:color node-icon) "inherit")}}
@@ -223,7 +228,7 @@
 
 (rum/defc tab-observer
   [tab {:keys [reset-q!]}]
-  (rum/use-effect!
+  (hooks/use-effect!
    #(reset-q!)
    [tab])
   nil)
@@ -248,7 +253,7 @@
                          (set-current! idx node))
                      (do (.focus (rum/deref *input-ref)) (set-current! -1 nil)))))
         down-handler!
-        (rum/use-callback
+        (hooks/use-callback
          (fn [^js e]
            (let []
              (if (= 13 (.-keyCode e))
@@ -266,7 +271,7 @@
                    40 (do (focus! (+ idx 9) :next) (util/stop e))
                    :dune))))) [])]
 
-    (rum/use-effect!
+    (hooks/use-effect!
      (fn []
         ;; calculate items
        (let [^js sections (.querySelectorAll (get-cnt) ".pane-section")
@@ -301,7 +306,7 @@
                             :size :sm :variant :outline
                             :class "it" :style {:background-color c}}
                            (if c "" (shui/tabler-icon "minus" {:class "scale-75 opacity-70"}))))]))]
-    (rum/use-effect!
+    (hooks/use-effect!
      (fn []
        (when-let [^js picker (some-> (rum/deref *el) (.closest ".cp__emoji-icon-picker"))]
          (let [color (if (string/blank? color) "inherit" color)]
@@ -449,7 +454,7 @@
                            (when-not (true? keep-popup?) (shui/popup-hide! id)))
               :icon-value icon-value
               :del-btn? del-btn?})))]
-    (rum/use-effect!
+    (hooks/use-effect!
      (fn []
        (when initial-open?
          (js/setTimeout #(some-> (rum/deref *trigger-ref) (.click)) 32)))

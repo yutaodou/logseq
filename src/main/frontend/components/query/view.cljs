@@ -2,9 +2,13 @@
   "DB query result view"
   (:require [frontend.components.views :as views]
             [frontend.db :as db]
+            [frontend.mixins :as mixins]
+            [frontend.modules.outliner.op :as outliner-op]
+            [frontend.modules.outliner.ui :as ui-outliner-tx]
+            [frontend.state]
             [logseq.db :as ldb]
-            [rum.core :as rum]
-            [frontend.mixins :as mixins]))
+            [promesa.core :as p]
+            [rum.core :as rum]))
 
 (defn- columns
   [config result]
@@ -41,11 +45,25 @@
   [state config view-entity result]
   (let [*result (::result state)
         result' (or @*result (init-result result view-entity))
-        columns' (columns (assoc config :container-id (::container-id state)) result')]
+        columns' (columns (assoc config :container-id (::container-id state)) result')
+        set-data! (fn [data] (reset! *result data))]
     [:div.query-result.w-full
      (views/view view-entity
                  {:title-key :views.table/live-query-title
                   :data result'
-                  :set-data! (fn [data]
-                               (when (seq data) (reset! *result data)))
-                  :columns columns'})]))
+                  :set-data! set-data!
+                  :columns columns'
+                  :on-delete-rows (fn [table selected-rows]
+                                    (let [pages (filter ldb/page? selected-rows)
+                                          blocks (remove ldb/page? selected-rows)
+                                          selected (set (map :id (remove :logseq.property/built-in? selected-rows)))
+                                          data' (remove (fn [row] (contains? selected (:id row))) (:data table))]
+                                      (p/do!
+                                       (set-data! data')
+                                       (ui-outliner-tx/transact!
+                                        {:outliner-op :delete-blocks}
+                                        (when (seq blocks)
+                                          (outliner-op/delete-blocks! blocks nil))
+                                        (doseq [page pages]
+                                          (when-let [id (:block/uuid page)]
+                                            (outliner-op/delete-page! id)))))))})]))

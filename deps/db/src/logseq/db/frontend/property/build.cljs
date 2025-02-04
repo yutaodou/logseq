@@ -1,16 +1,16 @@
 (ns logseq.db.frontend.property.build
   "Builds core property concepts"
-  (:require [logseq.db.sqlite.util :as sqlite-util]
+  (:require [datascript.core :as d]
+            [logseq.common.util :as common-util]
             [logseq.db.frontend.order :as db-order]
-            [datascript.core :as d]
-            [logseq.db.frontend.property.type :as db-property-type]))
+            [logseq.db.frontend.property :as db-property]
+            [logseq.db.frontend.property.type :as db-property-type]
+            [logseq.db.sqlite.util :as sqlite-util]))
 
 (defn- closed-value-new-block
   [block-id block-type value property]
   (let [property-id (:db/ident property)]
-    (merge {:block/type "closed value"
-            :block/format :markdown
-            :block/uuid block-id
+    (merge {:block/uuid block-id
             :block/page property-id
             :block/closed-value-property property-id
             :logseq.property/created-from-property (if (= property-id :logseq.property/default-value)
@@ -18,7 +18,7 @@
                                                      property-id)
             :block/parent property-id}
            (if (db-property-type/property-value-content? block-type property)
-             {:property.value/content value}
+             {:logseq.property/value value}
              {:block/title value}))))
 
 (defn build-closed-value-block
@@ -38,7 +38,7 @@
 
 (defn closed-values->blocks
   [property]
-  (map (fn [{uuid' :uuid :keys [db-ident value icon schema]}]
+  (map (fn [{uuid' :uuid :keys [db-ident value icon schema properties]}]
          (cond->
           (build-closed-value-block
            uuid'
@@ -46,6 +46,8 @@
            value
            property
            {:db-ident db-ident :icon icon})
+           (seq properties)
+           (merge properties)
            true
            (assoc :block/order (db-order/gen-key))))
        (:closed-values property)))
@@ -54,7 +56,8 @@
   "Builds all the tx needed for property with closed values including
    the hidden page and closed value blocks as needed"
   [db-ident prop-name property {:keys [property-attributes properties]}]
-  (let [property-schema (:block/schema property)
+  (let [property-schema (or (:schema property)
+                            (db-property/get-property-schema property))
         property-tx (merge (sqlite-util/build-new-property db-ident property-schema {:title prop-name
                                                                                      :ref-type? true
                                                                                      :properties properties})
@@ -62,26 +65,26 @@
     (into [property-tx]
           (closed-values->blocks property))))
 
-(defn build-property-value-block
+(defn- build-property-value-block
   "Builds a property value entity given a block map/entity, a property entity or
   ident and its property value"
   [block property value]
-  (-> (merge
-       {:block/uuid (d/squuid)
-        :block/format :markdown
-        :block/page (if (:block/page block)
-                      (:db/id (:block/page block))
-                     ;; page block
-                      (:db/id block))
-        :block/parent (:db/id block)
-        :logseq.property/created-from-property (if (= (:db/ident property) :logseq.property/default-value)
-                                                 (:db/id block)
-                                                 (or (:db/id property) {:db/ident (:db/ident property)}))
-        :block/order (db-order/gen-key)}
-       (if (db-property-type/property-value-content? (get-in block [:block/schema :type]) property)
-         {:property.value/content value}
-         {:block/title value}))
-      sqlite-util/block-with-timestamps))
+  (let [block-id (or (:db/id block) (:db/ident block))]
+    (-> (merge
+         {:block/uuid (d/squuid)
+          :block/page (if (:block/page block)
+                        (:db/id (:block/page block))
+                        ;; page block
+                        block-id)
+          :block/parent block-id
+          :logseq.property/created-from-property (if (= (:db/ident property) :logseq.property/default-value)
+                                                   block-id
+                                                   (or (:db/id property) {:db/ident (:db/ident property)}))
+          :block/order (db-order/gen-key)}
+         (if (db-property-type/property-value-content? (:logseq.property/type property) property)
+           {:logseq.property/value value}
+           {:block/title value}))
+        common-util/block-with-timestamps)))
 
 (defn build-property-values-tx-m
   "Builds a map of property names to their property value blocks to be

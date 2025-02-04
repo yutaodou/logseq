@@ -2,36 +2,38 @@
   (:require [cljs-bean.core :as bean]
             [clojure.string :as string]
             [frontend.components.block :as block]
+            [frontend.components.cmdk.core :as cmdk]
+            [frontend.components.icon :as icon]
             [frontend.components.onboarding :as onboarding]
             [frontend.components.page :as page]
+            [frontend.components.profiler :as profiler]
             [frontend.components.shortcut-help :as shortcut-help]
-            [frontend.components.cmdk.core :as cmdk]
             [frontend.context.i18n :refer [t]]
             [frontend.date :as date]
             [frontend.db :as db]
+            [frontend.db.rtc.debug-ui :as rtc-debug-ui]
             [frontend.extensions.slide :as slide]
             [frontend.handler.editor :as editor-handler]
+            [frontend.handler.route :as route-handler]
             [frontend.handler.ui :as ui-handler]
+            [frontend.hooks :as hooks]
             [frontend.state :as state]
             [frontend.ui :as ui]
-            [logseq.shui.ui :as shui]
             [frontend.util :as util]
+            [logseq.db :as ldb]
+            [logseq.shui.ui :as shui]
             [medley.core :as medley]
             [reitit.frontend.easy :as rfe]
-            [rum.core :as rum]
-            [frontend.db.rtc.debug-ui :as rtc-debug-ui]
-            [frontend.handler.route :as route-handler]
-            [logseq.db :as ldb]
-            [frontend.components.icon :as icon]))
+            [rum.core :as rum]))
 
 (rum/defc toggle
   []
   (when-not (util/sm-breakpoint?)
     (ui/with-shortcut :ui/toggle-right-sidebar "left"
-      [:button.button.icon.toggle-right-sidebar
-       {:title (t :right-side-bar/toggle-right-sidebar)
-        :on-click ui-handler/toggle-right-sidebar!}
-       (ui/icon "layout-sidebar-right" {:size 20})])))
+      (shui/button-ghost-icon :layout-sidebar-right
+                              {:title (t :right-side-bar/toggle-right-sidebar)
+                               :class "toggle-right-sidebar"
+                               :on-click ui-handler/toggle-right-sidebar!}))))
 
 (rum/defc block-cp < rum/reactive
   [repo idx block]
@@ -97,8 +99,8 @@
     (let [lookup (if (integer? db-id) db-id [:block/uuid db-id])
           page (db/entity repo lookup)]
       (if (ldb/page? page)
-        [[:.flex.items-center.page-title
-          (icon/get-node-icon-cp page {:class "text-md mr-2"})
+        [[:.flex.items-center.page-title.gap-1
+          (icon/get-node-icon-cp page {:class "text-md"})
           [:span.overflow-hidden.text-ellipsis (:block/title page)]]
          (page-cp repo (str (:block/uuid page)))]
         (block-with-breadcrumb repo page idx [repo db-id block-type] false)))
@@ -132,6 +134,10 @@
     :rtc
     [[:.flex.items-center (ui/icon "cloud" {:class "text-md mr-2"}) "(Dev) RTC"]
      (rtc-debug-ui/rtc-debug-ui)]
+
+    :profiler
+    [[:.flex.items-center (ui/icon "cloud" {:class "text-md mr-2"}) "(Dev) Profiler"]
+     (profiler/profiler)]
 
     ["" [:span]]))
 
@@ -300,7 +306,7 @@
                              width (str value "%")]
                          (.setAttribute (rum/deref el-ref) "aria-valuenow" value)
                          (ui-handler/persist-right-sidebar-width! width))))]
-    (rum/use-effect!
+    (hooks/use-effect!
      (fn []
        (when-let [el (and (fn? js/window.interact) (rum/deref el-ref))]
          (-> (js/interact el)
@@ -352,7 +358,7 @@
        #())
      [])
 
-    (rum/use-effect!
+    (hooks/use-effect!
      (fn []
         ;; sidebar animation duration
        (js/setTimeout
@@ -407,7 +413,12 @@
           [:div.text-sm
            [:button.button.cp__right-sidebar-settings-btn {:on-click (fn [_e]
                                                                        (state/sidebar-add-block! repo "rtc" :rtc))}
-            "(Dev) RTC"]])]]
+            "(Dev) RTC"]])
+        (when (state/sub [:ui/developer-mode?])
+          [:div.text-sm
+           [:button.button.cp__right-sidebar-settings-btn {:on-click (fn [_e]
+                                                                       (state/sidebar-add-block! repo "profiler" :profiler))}
+            "(Dev) Profiler"]])]]
 
       [:.sidebar-item-list.flex-1.scrollbar-spacing.px-2
        (if @*anim-finished?

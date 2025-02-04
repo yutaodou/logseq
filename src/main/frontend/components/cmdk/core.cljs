@@ -4,13 +4,13 @@
             [electron.ipc :as ipc]
             [frontend.components.block :as block]
             [frontend.components.cmdk.list-item :as list-item]
-            [frontend.components.title :as title]
             [frontend.config :as config]
             [frontend.context.i18n :refer [t]]
             [frontend.db :as db]
             [frontend.db.async :as db-async]
             [frontend.db.model :as model]
             [frontend.extensions.pdf.utils :as pdf-utils]
+            [frontend.handler.block :as block-handler]
             [frontend.handler.command-palette :as cp-handler]
             [frontend.handler.db-based.page :as db-page-handler]
             [frontend.handler.editor :as editor-handler]
@@ -18,6 +18,7 @@
             [frontend.handler.page :as page-handler]
             [frontend.handler.route :as route-handler]
             [frontend.handler.whiteboard :as whiteboard-handler]
+            [frontend.hooks :as hooks]
             [frontend.mixins :as mixins]
             [frontend.modules.shortcut.core :as shortcut]
             [frontend.modules.shortcut.utils :as shortcut-utils]
@@ -235,7 +236,7 @@
                "whiteboard"
                :else
                "page")
-        title (title/block-unique-title page)
+        title (block-handler/block-unique-title page)
         title' (if source-page (str title " -> alias: " (:block/title source-page)) title)]
     (hash-map :icon icon
               :icon-theme :gray
@@ -245,7 +246,7 @@
 (defn- block-item
   [repo block current-page !input]
   (let [id (:block/uuid block)
-        text (title/block-unique-title block)
+        text (block-handler/block-unique-title block)
         icon "letter-n"]
     {:icon icon
      :icon-theme :gray
@@ -481,10 +482,12 @@
       (reset! (::input state) search-query))))
 
 (defmethod handle-action :trigger [_ state _event]
-  (let [command (some-> state state->highlighted-item :source-command)]
+  (let [command (some-> state state->highlighted-item :source-command)
+        dont-close-commands #{:graph/open :graph/remove :dev/replace-graph-with-db-file
+                              :ui/toggle-settings :go/flashcards :dev/import-edn-data}]
     (when-let [action (:action command)]
       (action)
-      (when-not (contains? #{:graph/open :graph/remove :dev/replace-graph-with-db-file :ui/toggle-settings :go/flashcards} (:id command))
+      (when-not (contains? dont-close-commands (:id command))
         (shui/dialog-close! :ls-dialog-cmdk)))))
 
 (defmethod handle-action :create [_ state _event]
@@ -549,7 +552,7 @@
 
 (rum/defc mouse-active-effect!
   [*mouse-active? deps]
-  (rum/use-effect!
+  (hooks/use-effect!
    #(reset! *mouse-active? false)
    deps)
   nil)
@@ -684,7 +687,7 @@
               page' (db/entity repo [:block/uuid (:block/uuid page)])
               link (if (config/db-based-graph? repo)
                      (some (fn [[k v]]
-                             (when (= :url (get-in (db/entity repo k) [:block/schema :type]))
+                             (when (= :url (:logseq.property/type (db/entity repo k)))
                                (:block/title v)))
                            (:block/properties page'))
                      (some #(re-find editor-handler/url-regex (val %)) (:block/properties page')))]
@@ -761,10 +764,14 @@
 
 (defn- input-placeholder
   [sidebar?]
-  (let [search-mode (:search/mode @state/state)]
+  (let [search-mode (:search/mode @state/state)
+        search-args (:search/args @state/state)]
     (cond
       (and (= search-mode :graph) (not sidebar?))
       "Add graph filter"
+
+      (= search-args :new-page)
+      "Type a page name to create"
 
       :else
       "What are you looking for?")))
@@ -774,7 +781,7 @@
   (let [highlighted-item @(::highlighted-item state)
         input @(::input state)
         input-ref (::input-ref state)
-        debounced-on-change (rum/use-callback
+        debounced-on-change (hooks/use-callback
                              (gfun/debounce
                               (fn [e]
                                 (let [new-value (.-value (.-target e))]
@@ -786,11 +793,11 @@
     ;; use-effect [results-ordered input] to check whether the highlighted item is still in the results,
     ;; if not then clear that puppy out!
     ;; This was moved to a functional component
-    (rum/use-effect! (fn []
-                       (when (and highlighted-item (= -1 (.indexOf all-items (dissoc highlighted-item :mouse-enter-triggered-highlight))))
-                         (reset! (::highlighted-item state) nil)))
-                     [all-items])
-    (rum/use-effect! (fn [] (load-results :default state)) [])
+    (hooks/use-effect! (fn []
+                         (when (and highlighted-item (= -1 (.indexOf all-items (dissoc highlighted-item :mouse-enter-triggered-highlight))))
+                           (reset! (::highlighted-item state) nil)))
+                       [all-items])
+    (hooks/use-effect! (fn [] (load-results :default state)) [])
     [:div {:class "bg-gray-02 border-b border-1 border-gray-07"}
      [:input.cp__cmdk-search-input
       {:class "text-xl bg-transparent border-none w-full outline-none px-3 py-3"
@@ -949,6 +956,7 @@
                     ::input (atom (or (:initial-input opts) "")))))
    :will-unmount (fn [state]
                    (state/set-state! :search/mode nil)
+                   (state/set-state! :search/args nil)
                    state)}
   (mixins/event-mixin
    (fn [state]

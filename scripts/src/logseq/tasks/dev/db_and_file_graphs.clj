@@ -91,7 +91,8 @@
   (let [file-concepts (->>
                        ;; from logseq.db.frontend.schema
                        [:block/namespace :block/properties-text-values :block/pre-block :recent/pages :block/file :block/properties-order
-                        :block/repeated :block/deadline :block/scheduled :block/priority :block/marker :block/macros]
+                        :block/repeated :block/deadline :block/scheduled :block/priority :block/marker :block/macros
+                        :block/type :block/format]
                        (map str)
                        (into [;; e.g. block/properties :title
                               "block/properties :"
@@ -105,8 +106,10 @@
                               "/page-name-sanity-lc"]))
         ;; For now use the whole code line. If this is too brittle can make this smaller
         allowed-exceptions #{"{:block/name page-title})))"
+                             "{:block/name page-title})"
                              "(when-not (db/get-page journal)"
-                             "(let [value (if datetime? (tc/to-long d) (db/get-page journal))]"}
+                             "(let [value (if datetime? (tc/to-long d) (db/get-page journal))]"
+                             "(dissoc :block/format))]"}
         res (apply shell {:out :string :continue true}
                    "git grep -E" (str "(" (string/join "|" file-concepts) ")")
                    db-graph-paths)
@@ -123,7 +126,8 @@
   []
   (let [db-concepts
         ;; from logseq.db.frontend.schema
-        ["closed-value" "class/properties" "schema.classes" "property/parent"]
+        ["closed-value" "class/properties" "classes" "property/parent"
+         "logseq.property" "logseq.class"]
         res (apply shell {:out :string :continue true}
                    "git grep -E" (str "(" (string/join "|" db-concepts) ")")
                    file-graph-paths)]

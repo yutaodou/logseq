@@ -21,6 +21,7 @@
             [frontend.handler.route :as route-handler]
             [frontend.handler.ui :as ui-handler]
             [frontend.handler.user :as user-handler]
+            [frontend.hooks :as hooks]
             [frontend.mobile.util :as mobile-util]
             [frontend.modules.instrumentation.core :as instrument]
             [frontend.modules.shortcut.data-helper :as shortcut-helper]
@@ -640,10 +641,12 @@
                      (storage/set ::storage-spec/lsp-core-enabled v))]
     [:div.flex.items-center.gap-2
      (ui/toggle on? on-toggle true)
-     (when (not= (boolean value) on?)
-       (ui/button (t :plugin/restart)
-                  :on-click #(js/logseq.api.relaunch)
-                  :small? true :intent "logseq"))]))
+
+     (when (util/electron?)
+       (when (not= (boolean value) on?)
+         (ui/button (t :plugin/restart)
+                    :on-click #(js/logseq.api.relaunch)
+                    :small? true :intent "logseq")))]))
 
 (rum/defc http-server-enabled-switcher
   [t]
@@ -876,7 +879,7 @@
   (ui/toggle enabled?
              (fn []
                (let [value (not enabled?)]
-                 (config-handler/set-config! :feature/enable-rtc? value)))
+                 (state/set-rtc-enabled! value)))
              true))
 
 (defn rtc-switcher-row [enabled?]
@@ -1112,7 +1115,7 @@
                              (when (= "Enter" (util/ekey e))
                                (update-home-page e)))}]]]])
      (when-not db-based? (whiteboards-switcher-row enable-whiteboards?))
-     (when (and (util/electron?) config/feature-plugin-system-on?)
+     (when (and web-platform? config/feature-plugin-system-on?)
        (plugin-system-switcher-row))
      (when (util/electron?)
        (http-server-switcher-row))
@@ -1121,7 +1124,7 @@
      (when (and (config/db-based-graph? current-repo)
                 (user-handler/team-member?))
        ;; FIXME: Wire this up again to RTC init calls
-       (rtc-switcher-row (state/enable-rtc? current-repo)))
+       (rtc-switcher-row (state/enable-rtc?)))
      (when-not web-platform?
        [:div.mt-1.sm:mt-0.sm:col-span-2
         [:hr]
@@ -1172,7 +1175,7 @@
   < rum/static
   [active]
 
-  (rum/use-effect!
+  (hooks/use-effect!
    (fn []
      (let [active (and (sequential? active) (name (first active)))
            ^js ds (.-dataset js/document.body)]

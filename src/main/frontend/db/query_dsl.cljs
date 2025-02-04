@@ -6,20 +6,20 @@
             [clojure.set :as set]
             [clojure.string :as string]
             [clojure.walk :as walk]
+            [frontend.config :as config]
             [frontend.date :as date]
-            [frontend.db.utils :as db-utils]
             [frontend.db.model :as model]
             [frontend.db.query-react :as query-react]
-            [logseq.db.frontend.rules :as rules]
+            [frontend.db.utils :as db-utils]
+            [frontend.state :as state]
             [frontend.template :as template]
-            [logseq.graph-parser.text :as text]
+            [frontend.util :as util]
+            [frontend.util.text :as text-util]
+            [logseq.common.util :as common-util]
             [logseq.common.util.date-time :as date-time-util]
             [logseq.common.util.page-ref :as page-ref]
-            [logseq.common.util :as common-util]
-            [frontend.util.text :as text-util]
-            [frontend.util :as util]
-            [frontend.config :as config]
-            [frontend.state :as state]))
+            [logseq.db.frontend.rules :as rules]
+            [logseq.graph-parser.text :as text]))
 
 ;; Query fields:
 
@@ -303,7 +303,7 @@
             (subs v' 1)
             (or (page-ref/get-page-name v') v'))
           ;; Convert number pages to string
-          (and (double? v) (= :node (get-in (db-utils/entity k) [:block/schema :type])))
+          (and (double? v) (= :node (:logseq.property/type (db-utils/entity k))))
           (str v)
           :else
           v')))
@@ -323,7 +323,7 @@
     (or (some->> (name property-name)
                  (db-utils/q '[:find [(pull ?b [:db/ident]) ...]
                                :in $ ?title
-                               :where [?b :block/type "property"] [?b :block/title ?title]])
+                               :where [?b :block/tags :logseq.class/Property] [?b :block/title ?title]])
                  first
                  :db/ident)
         ;; Don't return nil as that incorrectly matches all properties
@@ -499,20 +499,20 @@
 (defn- build-file-query
   [e fe {:keys [sort-by]}]
   (cond
-       (= 'namespace fe)
-       (build-namespace e)
+    (= 'namespace fe)
+    (build-namespace e)
 
-       (= 'page-property fe)
-       (build-page-property e)
+    (= 'page-property fe)
+    (build-page-property e)
 
-       (= 'page-tags fe)
-       (build-page-tags e)
+    (= 'page-tags fe)
+    (build-page-tags e)
 
-       (= 'all-page-tags fe)
-       (build-all-page-tags)
+    (= 'all-page-tags fe)
+    (build-all-page-tags)
 
-       (= 'sort-by fe)
-       (build-sort-by e sort-by)))
+    (= 'sort-by fe)
+    (build-sort-by e sort-by)))
 
 (defn build-query
   "This fn converts a form/list in a query e.g. `(operator arg1 arg2)` to its datalog
@@ -529,9 +529,13 @@ Some bindings in this fn:
    ; {:post [(or (nil? %) (map? %))]}
    (let [fe (first e)
          fe (when fe
-              (if (list? fe)
+              (cond
+                (list? fe)
                 fe
-                (symbol (string/lower-case (name fe)))))
+                (or (symbol? fe) (keyword? fe))
+                (symbol (string/lower-case (name fe)))
+                :else
+                (string/lower-case (str fe))))
          page-ref? (page-ref/page-ref? e)]
      (when (or
             (:db-graph? env)
@@ -600,7 +604,7 @@ Some bindings in this fn:
                             (let [match' (string/replace (second matches) "#" tag-placeholder)]
                               (str "\"" page-ref/left-brackets match' page-ref/right-brackets "\"")))]
       (some-> s
-              (string/replace page-ref/page-ref-re quoted-page-ref)
+              (string/replace #"\"?\[\[(.*?)\]\]\"?" quoted-page-ref)
               (string/replace text-util/between-re
                               (fn [[_ x]]
                                 (->> (string/split x #" ")

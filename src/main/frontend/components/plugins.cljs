@@ -1,27 +1,28 @@
 (ns frontend.components.plugins
-  (:require [rum.core :as rum]
-            [frontend.state :as state]
-            [cljs-bean.core :as bean]
-            [frontend.context.i18n :refer [t]]
-            [frontend.ui :as ui]
-            [logseq.shui.ui :as shui]
-            [frontend.handler.ui :as ui-handler]
-            [frontend.handler.editor :as editor-handler]
-            [frontend.handler.plugin-config :as plugin-config-handler]
-            [frontend.handler.common.plugin :as plugin-common-handler]
-            [frontend.search :as search]
-            [frontend.util :as util]
-            [frontend.mixins :as mixins]
-            [frontend.config :as config]
+  (:require [cljs-bean.core :as bean]
+            [clojure.string :as string]
             [electron.ipc :as ipc]
-            [promesa.core :as p]
-            [frontend.components.svg :as svg]
             [frontend.components.plugins-settings :as plugins-settings]
+            [frontend.components.svg :as svg]
+            [frontend.config :as config]
+            [frontend.context.i18n :refer [t]]
+            [frontend.handler.common.plugin :as plugin-common-handler]
+            [frontend.handler.editor :as editor-handler]
             [frontend.handler.notification :as notification]
             [frontend.handler.plugin :as plugin-handler]
-            [frontend.storage :as storage]
+            [frontend.handler.plugin-config :as plugin-config-handler]
+            [frontend.handler.ui :as ui-handler]
+            [frontend.hooks :as hooks]
+            [frontend.mixins :as mixins]
             [frontend.rum :as rum-utils]
-            [clojure.string :as string]))
+            [frontend.search :as search]
+            [frontend.state :as state]
+            [frontend.storage :as storage]
+            [frontend.ui :as ui]
+            [frontend.util :as util]
+            [logseq.shui.ui :as shui]
+            [promesa.core :as p]
+            [rum.core :as rum]))
 
 (declare open-waiting-updates-modal!)
 (defonce PER-PAGE-SIZE 15)
@@ -134,7 +135,7 @@
 
 (rum/defc unpacked-plugin-loader
   [unpacked-pkg-path]
-  (rum/use-effect!
+  (hooks/use-effect!
    (fn []
      (let [err-handle
            (fn [^js e]
@@ -200,9 +201,9 @@
        :dangerouslySetInnerHTML {:__html content}}]]))
 
 (rum/defc remote-readme-display
-  [repo _content]
+  [{:keys [repo]} _content]
 
-  (let [src (str "lsp://logseq.com/marketplace.html?repo=" repo)]
+  (let [src (str "./marketplace.html?repo=" repo)]
     [:iframe.lsp-frame-readme {:src src}]))
 
 (defn security-warning
@@ -231,7 +232,7 @@
     [:a.btn
      {:class    (util/classnames [{:disabled   (or installed? installing-or-updating?)
                                    :installing installing-or-updating?}])
-      :on-click #(plugin-common-handler/install-marketplace-plugin item)}
+      :on-click #(plugin-common-handler/install-marketplace-plugin! item)}
      (if installed?
        (t :plugin/installed)
        (if installing-or-updating?
@@ -249,14 +250,17 @@
      [:strong (ui/icon "settings")]
      [:ul.menu-list
       [:li {:on-click #(plugin-handler/open-plugin-settings! id false)} (t :plugin/open-settings)]
-      [:li {:on-click #(js/apis.openPath url)} (t :plugin/open-package)]
+      (when (util/electron?)
+        [:li {:on-click #(js/apis.openPath url)} (t :plugin/open-package)])
       [:li {:on-click #(plugin-handler/open-report-modal! id name)} (t :plugin/report-security)]
       [:li {:on-click
             #(-> (shui/dialog-confirm!
                   [:b (t :plugin/delete-alert name)])
                  (p/then (fn []
                            (plugin-common-handler/unregister-plugin id)
-                           (plugin-config-handler/remove-plugin id))))}
+
+                           (when (util/electron?)
+                             (plugin-config-handler/remove-plugin id)))))}
        (t :plugin/uninstall)]]]
 
     (when (seq sponsors)
@@ -297,17 +301,18 @@
                true)]])
 
 (defn get-open-plugin-readme-handler
-  [url item repo]
+  [url {:keys [webPkg] :as item} repo]
   #(plugin-handler/open-readme!
-    url item (if repo remote-readme-display local-markdown-display)))
+    url item (if (or repo webPkg) remote-readme-display local-markdown-display)))
 
 (rum/defc plugin-item-card < rum/static
-  [t {:keys [id name title version url description author icon iir repo sponsors] :as item}
+  [t {:keys [id name title version url description author icon iir repo sponsors webPkg] :as item}
    disabled? market? *search-key has-other-pending?
    installing-or-updating? installed? stat coming-update]
 
-  (let [name        (or title name "Untitled")
-        unpacked?   (not iir)
+  (let [name (or title name "Untitled")
+        web? (not (nil? webPkg))
+        unpacked? (and (not web?) (not iir))
         new-version (state/coming-update-new-version? coming-update)]
     [:div.cp__plugins-item-card
      {:key   (str "lsp-card-" id)
@@ -336,10 +341,10 @@
 
       [:div.desc.text-xs.opacity-70
        [:p description]
-       ;;[:small (js/JSON.stringify (bean/->js settings))]
+     ;;[:small (js/JSON.stringify (bean/->js settings))]
        ]
 
-      ;; Author & Identity
+    ;; Author & Identity
       [:div.flag
        [:p.text-xs.pr-2.flex.justify-between
         [:small {:on-click #(when-let [^js el (js/document.querySelector ".cp__plugins-page .search-ctls input")]
@@ -350,7 +355,7 @@
                               (util/copy-to-clipboard! id))}
          (str "ID: " id)]]]
 
-      ;; Github repo
+    ;; Github repo
       [:div.flag.is-top.opacity-50
        (when repo
          [:a.flex {:target "_blank"
@@ -358,10 +363,10 @@
           (svg/github {:width 16 :height 16})])]
 
       (if market?
-        ;; market ctls
+     ;; market ctls
         (card-ctls-of-market item stat installed? installing-or-updating?)
 
-        ;; installed ctls
+     ;; installed ctls
         (card-ctls-of-installed
          id name url sponsors unpacked? disabled?
          installing-or-updating? has-other-pending? new-version item))]]))
@@ -400,14 +405,14 @@
    :intent "link"
    :target "_blank"))
 
-(rum/defc user-proxy-settings-panel
+(rum/defc user-proxy-settings-container
   [{:keys [protocol type] :as agent-opts}]
   (let [type        (or (not-empty type) (not-empty protocol) "system")
         [opts set-opts!] (rum/use-state agent-opts)
         [testing? set-testing?!] (rum/use-state false)
         *test-input (rum/create-ref)
         disabled?   (or (= (:type opts) "system") (= (:type opts) "direct"))]
-    [:div.cp__settings-network-proxy-panel
+    [:div.cp__settings-network-proxy-cnt
      [:h1.mb-2.text-2xl.font-bold (t :settings-page/network-proxy)]
      [:div.p-2
       [:p [:label [:strong (t :type)]
@@ -474,6 +479,78 @@
                               (p/let [_ (ipc/ipc :setProxy opts)]
                                 (state/set-state! [:electron/user-cfgs :settings/agent] opts))))]]]))
 
+(rum/defc load-from-web-url-container
+  []
+  (let [[url set-url!] (rum/use-state "http://127.0.0.1:8080/")
+        [pending? set-pending?] (rum/use-state false)
+        handle-submit! (fn []
+                         (set-pending? true)
+                         (-> (plugin-handler/load-plugin-from-web-url! url)
+                             (p/then #(do (notification/show! "New plugin registered!" :success)
+                                          (shui/dialog-close!)))
+                             (p/catch #(notification/show! (str %) :error))
+                             (p/finally
+                               #(set-pending? false))))]
+
+    [:div.px-4.pt-4.pb-2.rounded-md.flex.flex-col.gap-2
+     [:div.flex.flex-col.gap-3
+      (shui/input {:placeholder "http://"
+                   :value url
+                   :on-change #(set-url! (-> (util/evalue %) (util/trim-safe)))
+                   :auto-focus true})
+      [:span.text-gray-10
+       (shui/tabler-icon "info-circle" {:size 13})
+       [:span "URLs support both GitHub repositories and local development servers.
+      (For examples: https://github.com/xyhp915/logseq-journals-calendar,
+      http://localhost:8080/<plugin-dir-root>)"]]]
+     [:div.flex.justify-end
+      (shui/button {:disabled (or pending? (string/blank? url))
+                    :on-click handle-submit!}
+                   (if pending? (ui/loading) "Install"))]]))
+
+(rum/defc install-from-github-release-container
+  []
+  (let [[url set-url!] (rum/use-state "")
+        [opts set-opts!] (rum/use-state {:theme? false :effect? false})
+        [pending set-pending!] (rum/use-state false)
+        *input (rum/use-ref nil)]
+    [:div.p-4.flex.flex-col.pb-0
+     (shui/input {:placeholder "GitHub repo url"
+                  :value url
+                  :ref *input
+                  :on-change #(set-url! (util/evalue %))
+                  :auto-focus true})
+     [:div.flex.gap-6.pt-3.items-center.select-none
+      [:label.flex.items-center.gap-2
+       (shui/checkbox {:checked (:theme? opts)
+                       :on-checked-change #(set-opts! (assoc opts :theme? %))})
+       [:span.opacity-60 "theme?"]]
+      [:label.flex.items-center.gap-2
+       (shui/checkbox {:checked (:effect? opts)
+                       :on-checked-change #(set-opts! (assoc opts :effect? %))})
+       [:span.opacity-60 "effect?"]]]
+     [:div.flex.justify-end.pt-3
+      (shui/button
+       {:on-click (fn []
+                    (if (or (string/blank? (util/trim-safe url))
+                            (not (string/starts-with? url "https://")))
+                      (.focus (rum/deref *input))
+                      (let [url (string/replace-first url "https://github.com/" "")
+                            matched (re-find #"([^\/]+)/([^\/]+)" url)]
+                        (if-let [id (some-> matched (nth 2))]
+                          (do
+                            (set-pending! true)
+                            (-> #js {:id id :repo (first matched)
+                                     :theme (:theme? opts)
+                                     :effect (:effect? opts)}
+                                (js/window.logseq.api.__install_plugin)
+                                (p/then #(shui/dialog-close!))
+                                (p/catch #(notification/show! (str %) :error))
+                                (p/finally #(set-pending! false))))
+                          (notification/show! "Invalid GitHub repo url" :error)))))
+        :disabled pending}
+       (if pending (ui/loading "Installing") "Install"))]]))
+
 (rum/defc auto-check-for-updates-control
   []
   (let [[enabled, set-enabled!] (rum/use-state (plugin-handler/get-enabled-auto-check-for-updates?))
@@ -501,7 +578,7 @@
      [:div.flex.items-center.l
       (category-tabs t total-nums category #(reset! *category %))
 
-      (when (and develop-mode? (not market?))
+      (when (and develop-mode? (util/electron?) (not market?))
         [:div
          (ui/tippy {:html  [:div (t :plugin/unpacked-tips)]
                     :arrow true}
@@ -512,7 +589,8 @@
                      :class "load-unpacked"
                      :on-click plugin-handler/load-unpacked-plugin}))
 
-         (unpacked-plugin-loader selected-unpacked-pkg)])]
+         (when (util/electron?)
+           (unpacked-plugin-loader selected-unpacked-pkg))])]
 
      [:div.flex.items-center.r
       ;; extra info
@@ -600,24 +678,30 @@
                             [{:title [:span.flex.items-center.gap-1 (ui/icon "rotate-clockwise") (t :plugin/check-all-updates)]
                               :options {:on-click #(plugin-handler/user-check-enabled-for-updates! (not= :plugins category))}}])
 
-                          [{:title [:span.flex.items-center.gap-1 (ui/icon "world") (t :settings-page/network-proxy)]
-                            :options {:on-click #(state/pub-event! [:go/proxy-settings agent-opts])}}]
+                          (when (util/electron?)
+                            [{:title   [:span.flex.items-center.gap-1 (ui/icon "world") (t :settings-page/network-proxy)]
+                              :options {:on-click #(state/pub-event! [:go/proxy-settings agent-opts])}}
 
-                          [{:title [:span.flex.items-center.gap-1 (ui/icon "arrow-down-circle") (t :plugin.install-from-file/menu-title)]
-                            :options {:on-click plugin-config-handler/open-replace-plugins-modal}}]
+                             {:title   [:span.flex.items-center.gap-1 (ui/icon "arrow-down-circle") (t :plugin.install-from-file/menu-title)]
+                              :options {:on-click plugin-config-handler/open-replace-plugins-modal}}])
 
                           [{:hr true}]
 
                           (when (state/developer-mode?)
-                            [{:title [:span.flex.items-center.gap-1 (ui/icon "file-code") (t :plugin/open-preferences)]
-                              :options {:on-click
-                                        #(p/let [root (plugin-handler/get-ls-dotdir-root)]
-                                           (js/apis.openPath (str root "/preferences.json")))}}
-                             {:title [:span.flex.items-center.whitespace-nowrap.gap-1
-                                      (ui/icon "bug") (t :plugin/open-logseq-dir) [:code "~/.logseq"]]
-                              :options {:on-click
-                                        #(p/let [root (plugin-handler/get-ls-dotdir-root)]
-                                           (js/apis.openPath root))}}])
+                            (if (util/electron?)
+                              [{:title [:span.flex.items-center.gap-1 (ui/icon "file-code") (t :plugin/open-preferences)]
+                                :options {:on-click
+                                          #(p/let [root (plugin-handler/get-ls-dotdir-root)]
+                                             (js/apis.openPath (str root "/preferences.json")))}}
+                               {:title [:span.flex.items-center.whitespace-nowrap.gap-1
+                                        (ui/icon "bug") (t :plugin/open-logseq-dir) [:code "~/.logseq"]]
+                                :options {:on-click
+                                          #(p/let [root (plugin-handler/get-ls-dotdir-root)]
+                                             (js/apis.openPath root))}}]
+                              [{:title [:span.flex.items-center.whitespace-nowrap.gap-1
+                                        (ui/icon "plug") (t :plugin/load-from-web-url)]
+                                :options {:on-click
+                                          #(shui/dialog-open! load-from-web-url-container)}}]))
 
                           [{:title [:span.flex.items-center.gap-1 (ui/icon "alert-triangle") (t :plugin/report-security)]
                             :options {:on-click #(plugin-handler/open-report-modal!)}}]
@@ -657,7 +741,7 @@
   (let [^js inViewState (ui/useInView #js {:threshold 0})
         in-view?        (.-inView inViewState)]
 
-    (rum/use-effect!
+    (hooks/use-effect!
      (fn []
        (load-more!))
      [in-view?])
@@ -794,7 +878,7 @@
          (when (seq sorted-plugins)
            (lazy-items-loader load-more-pages!))]])]))
 
-(rum/defcs installed-plugins
+(rum/defcs ^:large-vars/data-var installed-plugins
   < rum/static rum/reactive
   plugin-items-list-mixins
   (rum/local "" ::search-key)
@@ -891,8 +975,11 @@
                                true nil (get coming-updates pid)))
            (:id item)))]
 
-      (when (seq sorted-plugins)
-        (lazy-items-loader load-more-pages!))]]))
+      (if (seq sorted-plugins)
+        (lazy-items-loader load-more-pages!)
+        [:div.flex.items-center.justify-center.py-28.flex-col.gap-2.opacity-30
+         (shui/tabler-icon "list-search" {:size 40})
+         [:span.text-sm "Nothing Found."]])]]))
 
 (rum/defcs waiting-coming-updates
   < rum/reactive
@@ -999,13 +1086,13 @@
          id      (str "slot__" rs)
          *el-ref (rum/use-ref nil)]
 
-     (rum/use-effect!
+     (hooks/use-effect!
       (fn []
         (let [timer (js/setTimeout #(callback {:type type :slot id :payload payload}) 50)]
           #(js/clearTimeout timer)))
       [id])
 
-     (rum/use-effect!
+     (hooks/use-effect!
       (fn []
         (let [el (rum/deref *el-ref)]
           #(when-let [uis (seq (.querySelectorAll el "[data-injected-ui]"))]
@@ -1029,7 +1116,7 @@
         uni    #(str prefix "injected-ui-item-" %)
         ^js pl (js/LSPluginCore.registeredPlugins.get (name pid))]
 
-    (rum/use-effect!
+    (hooks/use-effect!
      (fn []
        (when-let [^js el (rum/deref *el)]
          (js/LSPlugin.pluginHelpers.setupInjectedUI.call
@@ -1101,17 +1188,17 @@
                           {:as-dropdown? true
                            :content-props {:class "toolbar-plugins-manager-content"}}))}
 
-     [:a.button.relative.toolbar-plugins-manager-trigger
-      (ui/icon "puzzle" {:size 20})
-      (when badge-updates?
-        (ui/point "bg-red-600.top-1.right-1.absolute" 4 {:style {:margin-right 2 :margin-top 2}}))]]))
+     (shui/button-ghost-icon :puzzle
+                             {:class "flex relative toolbar-plugins-manager-trigger"}
+                             (when badge-updates?
+                               (ui/point "bg-red-600.top-1.right-1.absolute" 4 {:style {:margin-right 2 :margin-top 2}})))]))
 
 (rum/defc header-ui-items-list-wrap
   [children]
   (let [*wrap-el (rum/use-ref nil)
         [right-sidebar-resized] (rum-utils/use-atom ui-handler/*right-sidebar-resized-at)]
 
-    (rum/use-effect!
+    (hooks/use-effect!
      (fn []
        (when-let [^js wrap-el (rum/deref *wrap-el)]
          (when-let [^js header-el (.closest wrap-el ".cp__header")]
@@ -1180,11 +1267,11 @@
         *cm (rum/use-ref nil)
         *el (rum/use-ref nil)]
 
-    (rum/use-effect!
+    (hooks/use-effect!
      #(set-content1! content)
      [content])
 
-    (rum/use-effect!
+    (hooks/use-effect!
      (fn []
        (some-> (rum/deref *el)
                (.closest ".ui-fenced-code-wrap")
@@ -1198,7 +1285,7 @@
          (.setCursor cm (.lineCount cm) (count (.getLine cm (.lastLine cm))))))
      [editor-active?])
 
-    (rum/use-effect!
+    (hooks/use-effect!
      (fn []
        (let [t (js/setTimeout
                 #(when-let [^js cm (some-> (rum/deref *el)
@@ -1235,33 +1322,42 @@
         market? (= active :marketplace)
         *el-ref (rum/create-ref)]
 
-    (rum/use-effect!
+    (hooks/use-effect!
      (fn []
        (state/load-app-user-cfgs)
        #(clear-dirties-states!))
      [])
 
-    (rum/use-effect!
+    (hooks/use-effect!
      #(clear-dirties-states!)
      [market?])
 
     [:div.cp__plugins-page
-     {:ref       *el-ref
+     {:ref *el-ref
+      :class (when-not (util/electron?) "web-platform")
       :tab-index "-1"}
-     [:h1 (t :plugins)]
-     (security-warning)
 
-     [:hr.my-4]
+     [:h1 (t :plugins)]
+
+     (when (util/electron?)
+       [:<>
+        (security-warning)
+        [:hr.my-4]])
 
      [:div.tabs.flex.items-center.justify-center
       [:div.tabs-inner.flex.items-center
-       (ui/button [:span.it (t :plugin/installed)]
-                  :on-click #(set-active! :installed)
-                  :intent (if-not market? "" "link"))
+       (shui/button {:on-click #(set-active! :installed)
+                     :class (when (not market?) "active")
+                     :size :sm
+                     :variant :text}
+                    (t :plugin/installed))
 
-       (ui/button [:span.mk (svg/apps 16) (t :plugin/marketplace)]
-                  :on-click #(set-active! :marketplace)
-                  :intent (if market? "" "link"))]]
+       (shui/button {:on-click #(set-active! :marketplace)
+                     :class (when market? "active")
+                     :size :sm
+                     :variant :text}
+                    (shui/tabler-icon "apps")
+                    (t :plugin/marketplace))]]
 
      [:div.panels
       (if market?
@@ -1293,7 +1389,7 @@
                         (catch js/Error _
                           (set-uid (notification/show! content status false nil nil cb)))))))]
 
-    (rum/use-effect!
+    (hooks/use-effect!
      (fn []
        (if check-pending?
          (notify!
@@ -1304,7 +1400,7 @@
          (when uid (notification/clear! uid))))
      [check-pending? sub-content])
 
-    (rum/use-effect!
+    (hooks/use-effect!
       ;; scheduler for auto updates
      (fn []
        (when online?
@@ -1314,10 +1410,12 @@
                           (not (number? last-updates))
                            ;; interval 12 hours
                           (> (- (js/Date.now) last-updates) (* 60 60 12 1000))))
-             (js/setTimeout
-              (fn []
-                (plugin-handler/auto-check-enabled-for-updates!)
-                (storage/set :lsp-last-auto-updates (js/Date.now))))))))
+             (let [update-timer (js/setTimeout
+                                 (fn []
+                                   (plugin-handler/auto-check-enabled-for-updates!)
+                                   (storage/set :lsp-last-auto-updates (js/Date.now)))
+                                 (if (util/electron?) 3000 (* 60 1000)))]
+               #(js/clearTimeout update-timer))))))
      [online?])
 
     [:<>]))
@@ -1372,7 +1470,7 @@
 
 (rum/defc custom-js-installer
   [{:keys [t current-repo db-restoring? nfs-granted?]}]
-  (rum/use-effect!
+  (hooks/use-effect!
    (fn []
      (when (and (not db-restoring?)
                 (or (not util/nfs?) nfs-granted?))

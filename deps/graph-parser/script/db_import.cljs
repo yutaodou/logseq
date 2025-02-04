@@ -2,21 +2,34 @@
   "Imports given file(s) to a db graph. This script is primarily for
    developing the import feature and for engineers who want to customize
    the import process"
-  (:require [clojure.string :as string]
-            [datascript.core :as d]
-            ["path" :as node-path]
-            ["os" :as os]
-            ["fs" :as fs]
+  (:require ["fs" :as fs]
             ["fs/promises" :as fsp]
-            [nbb.core :as nbb]
-            [nbb.classpath :as cp]
-            [babashka.cli :as cli]
-            [logseq.graph-parser.exporter :as gp-exporter]
-            [logseq.common.graph :as common-graph]
+            ["os" :as os]
+            ["path" :as node-path]
             #_:clj-kondo/ignore
+            [babashka.cli :as cli]
+            [cljs.pprint :as pprint]
+            [clojure.set :as set]
+            [clojure.string :as string]
+            [datascript.core :as d]
+            [logseq.common.graph :as common-graph]
+            [logseq.graph-parser.exporter :as gp-exporter]
             [logseq.outliner.cli :as outliner-cli]
-            [promesa.core :as p]
-            [clojure.set :as set]))
+            [logseq.outliner.pipeline :as outliner-pipeline]
+            [nbb.classpath :as cp]
+            [nbb.core :as nbb]
+            [promesa.core :as p]))
+
+(def tx-queue (atom cljs.core/PersistentQueue.EMPTY))
+(def original-transact! d/transact!)
+(defn dev-transact! [conn tx-data tx-meta]
+  (swap! tx-queue (fn [queue]
+                    (let [new-queue (conj queue {:tx-data tx-data :tx-meta tx-meta})]
+                          ;; Only care about last few so vary 10 as needed
+                      (if (> (count new-queue) 10)
+                        (pop new-queue)
+                        new-queue))))
+  (original-transact! conn tx-data tx-meta))
 
 (defn- build-graph-files
   "Given a file graph directory, return all files including assets and adds relative paths
@@ -41,11 +54,13 @@
           _ (fsp/mkdir parent-dir #js {:recursive true})]
     (fsp/copyFile (:path file) (node-path/join parent-dir (node-path/basename (:path file))))))
 
-(defn- notify-user [{:keys [continue]} m]
+(defn- notify-user [{:keys [continue debug]} m]
   (println (:msg m))
   (when (:ex-data m)
-    (println "Ex-data:" (pr-str (dissoc (:ex-data m) :error)))
-    (println "Stacktrace:")
+    (println "Ex-data:" (pr-str (merge (dissoc (:ex-data m) :error)
+                                       (when-let [err (get-in m [:ex-data :error])]
+                                         {:original-error (ex-data (.-cause err))}))))
+    (println "\nStacktrace:")
     (if-let [stack (some-> (get-in m [:ex-data :error]) ex-data :sci.impl/callstack deref)]
       (println (string/join
                 "\n"
@@ -55,7 +70,14 @@
                        (when (:sci.impl/f-meta %)
                          (str " calls #'" (get-in % [:sci.impl/f-meta :ns]) "/" (get-in % [:sci.impl/f-meta :name]))))
                  (reverse stack))))
-      (println (some-> (get-in m [:ex-data :error]) .-stack))))
+      (println (some-> (get-in m [:ex-data :error]) .-stack)))
+    (when debug
+      (when-let [matching-tx (seq (filter #(and (get-in m [:ex-data :path])
+                                                (or (= (get-in % [:tx-meta ::gp-exporter/path]) (get-in m [:ex-data :path]))
+                                                    (= (get-in % [:tx-meta ::outliner-pipeline/original-tx-meta ::gp-exporter/path]) (get-in m [:ex-data :path]))))
+                                          @tx-queue))]
+        (println (str "\n" (count matching-tx)) "Tx Maps for failing path:")
+        (pprint/pprint matching-tx))))
   (when (and (= :error (:level m)) (not continue))
     (js/process.exit 1)))
 
@@ -83,7 +105,8 @@
                         ;; asset file options
                        {:<copy-asset (fn copy-asset [file]
                                        (<copy-asset-file file db-graph-dir file-graph-dir))})]
-    (gp-exporter/export-file-graph conn conn config-file *files options)))
+    (p/with-redefs [d/transact! dev-transact!]
+      (gp-exporter/export-file-graph conn conn config-file *files options))))
 
 (defn- resolve-path
   "If relative path, resolve with $ORIGINAL_PWD"
@@ -98,8 +121,9 @@
   (let [doc-options (gp-exporter/build-doc-options {:macros {}} (merge options (default-export-options options)))
         files' (mapv #(hash-map :path %)
                      (into [file] (map resolve-path files)))]
-    (p/let [_ (gp-exporter/export-doc-files conn files' <read-file doc-options)]
-      {:import-state (:import-state doc-options)})))
+    (p/with-redefs [d/transact! dev-transact!]
+      (p/let [_ (gp-exporter/export-doc-files conn files' <read-file doc-options)]
+        {:import-state (:import-state doc-options)}))))
 
 (def spec
   "Options spec"
@@ -107,6 +131,8 @@
           :desc "Print help"}
    :verbose {:alias :v
              :desc "Verbose mode"}
+   :debug {:alias :d
+           :desc "Debug mode"}
    :continue {:alias :c
               :desc "Continue past import failures"}
    :all-tags {:alias :a
@@ -150,7 +176,7 @@
         _ (when (:verbose options) (prn :options user-options))
         options' (merge {:user-options user-options
                          :graph-name db-name}
-                        (select-keys options [:files :verbose :continue]))]
+                        (select-keys options [:files :verbose :continue :debug]))]
     (p/let [{:keys [import-state]}
             (if directory?
               (import-file-graph-to-db file-graph' (node-path/join dir db-name) conn options')
@@ -158,6 +184,8 @@
 
       (when-let [ignored-props (seq @(:ignored-properties import-state))]
         (println "Ignored properties:" (pr-str ignored-props)))
+      (when-let [ignored-files (seq @(:ignored-files import-state))]
+        (println (count ignored-files) "ignored file(s):" (pr-str (vec ignored-files))))
       (when (:verbose options') (println "Transacted" (count (d/datoms @conn :eavt)) "datoms"))
       (println "Created graph" (str db-name "!")))))
 

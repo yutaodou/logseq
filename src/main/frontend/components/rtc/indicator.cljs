@@ -1,16 +1,16 @@
 (ns frontend.components.rtc.indicator
   "RTC state indicator"
   (:require [cljs-time.core :as t]
-            [frontend.common.missionary-util :as c.m]
-            [frontend.components.rtc.flows :as rtc-flows]
+            [clojure.pprint :as pprint]
+            [frontend.db :as db]
+            [frontend.handler.db-based.rtc-flows :as rtc-flows]
             [frontend.state :as state]
             [frontend.ui :as ui]
             [frontend.util :as util]
+            [frontend.common.missionary :as c.m]
             [logseq.shui.ui :as shui]
             [missionary.core :as m]
-            [rum.core :as rum]
-            [clojure.pprint :as pprint]
-            [frontend.db :as db]))
+            [rum.core :as rum]))
 
 (comment
   (def rtc-state-schema
@@ -169,12 +169,11 @@
           :variant :ghost
           :size    :sm}
          "Uploading..."))
-      [:a.button.cloud
-       {:on-click #(shui/popup-show! (.-target %)
-                                     (details online?)
-                                     {:align "end"})
-        :class    (util/classnames [{:on      (and online? (= :open rtc-state))
-                                     :idle    (and online? (= :open rtc-state) (zero? unpushed-block-update-count))
-                                     :queuing (pos? unpushed-block-update-count)}])}
-       [:span.flex.items-center
-        (ui/icon "cloud" {:size ui/icon-size})]]]]))
+      (shui/button-ghost-icon :cloud
+                              {:on-click #(shui/popup-show! (.-target %)
+                                                            (details online?)
+                                                            {:align "end"})
+                               :class (util/classnames [{:cloud true
+                                                         :on (and online? (= :open rtc-state))
+                                                         :idle (and online? (= :open rtc-state) (zero? unpushed-block-update-count))
+                                                         :queuing (pos? unpushed-block-update-count)}])})]]))

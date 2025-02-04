@@ -1,7 +1,8 @@
 (ns frontend.worker.rtc.log-and-state
   "Fns to generate rtc related logs"
-  (:require [frontend.common.schema-register :as sr]
+  (:require [frontend.common.missionary :as c.m]
             [frontend.worker.util :as worker-util]
+            [logseq.common.defkeywords :refer [defkeywords]]
             [malli.core :as ma]
             [missionary.core :as m]))
 
@@ -11,11 +12,9 @@
   "used by rtc-e2e-test"
   (m/watch *rtc-log))
 
-(sr/defkeyword :rtc.log/upload
-  "rtc log type for upload-graph.")
-
-(sr/defkeyword :rtc.log/download
-  "rtc log type for upload-graph.")
+(defkeywords
+  :rtc.log/upload {:doc "rtc log type for upload-graph."}
+  :rtc.log/download {:doc "rtc log type for upload-graph."})
 
 (def ^:private rtc-log-type-schema
   [:enum
@@ -65,16 +64,14 @@
   [graph-uuid]
   (->> (m/watch *graph-uuid->local-t)
        (m/eduction (keep (fn [m] (get m (ensure-uuid graph-uuid)))))
-       (m/reductions {} nil)
-       (m/latest identity)))
+       c.m/continue-flow))
 
 (defn create-remote-t-flow
   [graph-uuid]
   {:pre [(some? graph-uuid)]}
   (->> (m/watch *graph-uuid->remote-t)
        (m/eduction (keep (fn [m] (get m (ensure-uuid graph-uuid)))))
-       (m/reductions {} nil)
-       (m/latest identity)))
+       c.m/continue-flow))
 
 (defn update-local-t
   [graph-uuid local-t]
